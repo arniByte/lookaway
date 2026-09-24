@@ -70,18 +70,13 @@ export class Screens {
       'title clear',
       h(
         'div.col',
-        h('div.kicker', 'Полевой лидар · экспедиция'),
-        h('h1.display', 'LOOK AWAY'),
-        h('p.lede', 'Долина без света. Ты видишь только то, что отсканировал, — и только пока помнишь. Опиши местную жизнь. Прошлая экспедиция всё ещё здесь.'),
+        h('h1.display', 'Look Away'),
+        h('p.lede', 'Долина без света. Видишь только то, что отсканировал. Прошлая экспедиция всё ещё здесь.'),
         h('div.row.actions', btn('Начать с камерой', o.onCamera, 'primary'), btn('Без камеры', o.onKeyboard)),
         h('div.row.links', btn(o.daily, o.onDaily, 'link'), btn('Только глазами · эксперимент', o.onHandsFree, 'link')),
         o.message ? h('div.msg', o.message) : null,
       ),
-      h(
-        'div.foot.small.muted',
-        h('span', 'Видео с камеры обрабатывается только на этом устройстве и никуда не отправляется.'),
-        h('span', 'Лучше в наушниках, в полутьме, чтобы экран освещал лицо'),
-      ),
+      h('div.foot.small.muted', 'Видео с камеры не покидает устройство. Лучше в наушниках.'),
     );
   }
 

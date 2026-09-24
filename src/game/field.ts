@@ -12,8 +12,8 @@ import { Hud, type HudTarget } from '../ui/hud';
 import { Journal, NotePanel, StudyPanel } from '../ui/journal';
 import { Screens } from '../ui/screens';
 import { dailySeed, makeRng } from '../world/random';
-import { buildFigure, POSES } from '../world/meshes';
-import { CLADE_RU } from '../world/species';
+import { buildAnimal } from '../world/meshes';
+import { CLADE_RU, generateSpecies } from '../world/species';
 import { generateWorld, type PlantInstance, type Statue, type World } from '../world/worldgen';
 import { eyePulse, HandsFree, KeyboardMouse } from './controls';
 import { createDirector, onPulse, onReveal, stepDirector, type Director } from './director';
@@ -144,9 +144,10 @@ export class FieldApp {
   private showTitle(message = ''): void {
     this.phase = 'title';
     this.hud.visible = false;
-    // Фон титула: он. Медленно поворачивается, голова набок (облако точек с EDL).
-    const sc = config.stalker;
-    this.specimen.openGeometry(buildFigure(POSES.tilt, { height: 1.78 * sc.heightMul, armMul: sc.armMul, backpack: false, fingers: true }), TITLE_SEED);
+    // Фон титула: бабочка крупным планом — рисунок крыльев (жилки, глазки), медленные взмахи.
+    const sp = generateSpecies(TITLE_SEED).find((x) => x.clade === 'lepidoptera')!;
+    const hero = { ...sp, genome: { ...sp.genome, pattern: 0.85, aspect: 0.8, reflect905: 0.72 } };
+    this.specimen.openAnimal(buildAnimal(hero, TITLE_SEED, 4), TITLE_SEED, 0, 0.95, 140_000);
     const today = dailySeed();
     this.screens.title({
       onCamera: () => void this.choose('camera'),
@@ -526,8 +527,8 @@ export class FieldApp {
     const r = this.run;
 
     if (this.phase === 'title' && this.specimen.active) {
-      this.specimen.update(1, dt, now, 0, 0.6);
-      this.specimen.prepare(this.renderer, 0.2);
+      this.specimen.update(1, dt, now, 0, { look: 0.6, flap: 0.42, yaw: 0.55 + 0.3 * Math.sin(now / 7000), tilt: 0.95, pattern: 1 });
+      this.specimen.prepare(this.renderer, 0.2, 0.88);
       this.composer.render(this.renderer, this.specimen.scene, this.specimen.camera, { strength: 0.9, time: now });
       return;
     }
@@ -729,7 +730,6 @@ export class FieldApp {
         documented: docN,
         goal: config.research.documentGoal,
         total: r.world.species.length,
-        palette: PALETTES[this.palette],
         charge: r.scanner.charge,
         power,
         charging,

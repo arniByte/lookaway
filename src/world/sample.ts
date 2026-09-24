@@ -69,3 +69,25 @@ export function sampleSurface(geo: THREE.BufferGeometry, n: number, rnd: Rng): S
   }
   return out;
 }
+
+/** Площадь поверхности меша, м² (для распределения точек между частями образца). */
+export function surfaceArea(geo: THREE.BufferGeometry): number {
+  const P = geo.getAttribute('position');
+  const idx = geo.getIndex();
+  const tri = idx ? idx.count / 3 : P.count / 3;
+  const at = (t: number, k: number) => (idx ? idx.getX(t * 3 + k) : t * 3 + k);
+  let total = 0;
+  for (let t = 0; t < tri; t++) {
+    const a = at(t, 0);
+    const b = at(t, 1);
+    const c = at(t, 2);
+    const ux = P.getX(b) - P.getX(a);
+    const uy = P.getY(b) - P.getY(a);
+    const uz = P.getZ(b) - P.getZ(a);
+    const vx = P.getX(c) - P.getX(a);
+    const vy = P.getY(c) - P.getY(a);
+    const vz = P.getZ(c) - P.getZ(a);
+    total += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+  }
+  return total;
+}
