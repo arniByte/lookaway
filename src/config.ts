@@ -147,6 +147,26 @@ export const config = {
     },
   },
 
+  // v2: процедурная долина (GDD → Мир).
+  world: {
+    radius: 105, // м, проходимая часть долины
+    spawnClearing: 12, // м, поляна вокруг маяка
+    hillHeight: 7,
+    rimHeight: 30, // обрыв по краю
+    variantsPerSpecies: 3, // разных мешей на вид (инстансы вращаются и масштабируются)
+    rockCount: 140,
+    treeCell: 5,
+    treeDensity: 0.5,
+    fernCell: 3,
+    fernDensity: 0.28,
+    flowerClusters: 26,
+    fungusPatches: 40,
+    grassCell: 1.7,
+    grassDensity: 0.45,
+    animalsPerSpecies: 9,
+    darkMinDist: 70, // чёрная материя появляется не ближе
+  },
+
   render: {
     hfovDeg: 90, // горизонтальный FOV постоянный: дорожки в центрах зон при любом aspect
     eyeHeight: 1.6,
