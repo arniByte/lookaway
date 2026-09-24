@@ -96,6 +96,7 @@ export class GeoBuilder {
     spokes: number,
     mat: number,
     refl: (r: number, th: number) => number,
+    lift?: (r: number, th: number) => number, // изгиб крыла вдоль нормали, м
   ): void {
     const base = this.pos.length / 3;
     const nrm = out.clone().cross(fwd).normalize();
@@ -105,6 +106,7 @@ export class GeoBuilder {
       for (let j = 0; j <= rings; j++) {
         const r = (j / rings) * R;
         const p = root.clone().add(out.clone().multiplyScalar(Math.cos(th) * r)).add(fwd.clone().multiplyScalar(Math.sin(th) * r));
+        if (lift) p.add(nrm.clone().multiplyScalar(lift(j / rings, th)));
         this.vert(p, nrm, refl(j / rings, th), mat);
       }
     }
@@ -520,25 +522,79 @@ function butterfly(g: Genome, r: Rng, detail: number): AnimalParts {
   const S = g.size; // размах
   const body = new GeoBuilder();
   const len = S * 0.45;
-  const path: V3[] = [];
-  for (let i = 0; i <= 6; i++) path.push(v(0, 0, -len / 2 + (len * i) / 6));
-  body.tube(path, path.map((_, i) => S * 0.035 * Math.sin(Math.PI * (0.15 + (0.7 * i) / 6))), 6, MAT.insect, () => 0.5);
-  for (const s of [-1, 1]) {
-    const ant: V3[] = [v(0, 0, len / 2), v(s * S * 0.08, S * 0.06, len / 2 + S * 0.2)];
-    body.tube(ant, [S * 0.004, S * 0.003], 3, MAT.insect, () => 0.4);
+  const bodyR = S * 0.034;
+  const fuzz = makeRng(Math.floor(g.pattern * 1e6) + 7);
+
+  // Грудь: опушённый эллипсоид; брюшко: сегменты с перетяжками; голова с фасеточными глазами.
+  body.ellipsoid(v(0, 0, len * 0.08), v(bodyR * 1.15, bodyR * 1.1, len * 0.17), Math.round(10 * detail), Math.round(6 * detail), MAT.insect, () => 0.42, () => 1 + (fuzz() - 0.5) * 0.18);
+  const segs = 9;
+  const abd: V3[] = [];
+  const abdR: number[] = [];
+  for (let i = 0; i <= segs * 2; i++) {
+    const t = i / (segs * 2);
+    abd.push(v(0, -t * S * 0.02, -len * 0.08 - t * len * 0.46));
+    abdR.push(bodyR * (0.95 - 0.6 * t * t) * (i % 2 ? 0.86 : 1)); // перетяжки между сегментами
   }
+  body.tube(abd, abdR, Math.max(6, Math.round(6 * detail)), MAT.insect, (t) => 0.5 - 0.15 * t);
+  const head = v(0, 0, len * 0.3);
+  body.ellipsoid(head, v(bodyR * 0.8, bodyR * 0.75, bodyR * 0.75), Math.round(8 * detail), Math.round(5 * detail), MAT.insect, () => 0.45);
+  for (const s of [-1, 1]) body.ellipsoid(head.clone().add(v(s * bodyR * 0.62, bodyR * 0.1, bodyR * 0.2)), v(bodyR * 0.42, bodyR * 0.48, bodyR * 0.42), Math.round(7 * detail), Math.round(4 * detail), MAT.insect, () => 0.9);
+
+  // Усики с булавами, свёрнутый хоботок, три пары ног.
+  for (const s of [-1, 1]) {
+    const ant = [head.clone(), head.clone().add(v(s * S * 0.05, S * 0.05, S * 0.1)), head.clone().add(v(s * S * 0.11, S * 0.07, S * 0.22))];
+    body.tube(ant, [S * 0.004, S * 0.0035, S * 0.003], 3, MAT.insect, () => 0.4);
+    body.ellipsoid(ant[2], v(S * 0.009, S * 0.009, S * 0.02), 6, 4, MAT.insect, () => 0.6);
+  }
+  const coil: V3[] = [];
+  for (let k = 0; k <= 16; k++) {
+    const a = (k / 16) * Math.PI * 3;
+    const rr = S * 0.018 * (1 - k / 22);
+    coil.push(head.clone().add(v(0, -bodyR * 0.7 - rr * (1 - Math.cos(a)), bodyR * 0.3 + rr * Math.sin(a))));
+  }
+  body.tube(coil, coil.map(() => S * 0.0022), 3, MAT.insect, () => 0.35);
+  for (let k = 0; k < 3; k++) {
+    for (const s of [-1, 1]) {
+      const z = len * (0.18 - k * 0.1);
+      const hip = v(s * bodyR * 0.6, -bodyR * 0.6, z);
+      const knee = hip.clone().add(v(s * S * 0.06, -S * 0.03, S * 0.02 * (1 - k)));
+      const foot = knee.clone().add(v(s * S * 0.03, -S * 0.07, S * 0.03 * (1 - k)));
+      body.tube([hip, knee, foot], [S * 0.004, S * 0.003, S * 0.002], 3, MAT.insect, () => 0.35);
+    }
+  }
+
+  // Крылья: фестончатый край, у выраженного рисунка — «хвосты» на задних; изгиб чашкой.
   const wings: AnimalParts['wings'] = [];
-  const rings = Math.round(6 * detail);
-  const spokes = Math.round(14 * detail);
+  const rings = Math.round(8 * detail);
+  const spokes = Math.round(18 * detail);
+  const tail = g.aspect > 0.55 ? S * 0.26 * (g.aspect - 0.4) : 0;
+  // Переднее — треугольное с заострённой вершиной (~0.65 рад), заднее — округлая лопасть с фестонами.
+  const fore = (th: number) => S * 0.55 * (0.42 + 0.58 * Math.exp(-(((th - 0.65) / (0.45 + g.aspect * 0.12)) ** 2))) * (0.85 + g.aspect * 0.3) * (1 + 0.015 * Math.sin(th * 34));
+  const hind = (th: number) => S * 0.4 * (0.5 + 0.5 * Math.exp(-(((th + 0.45) / 0.6) ** 2))) * (1.05 - g.aspect * 0.2) * (1 + 0.035 * Math.abs(Math.sin(th * 12))) + tail * Math.exp(-(((th + 0.95) / 0.07) ** 2));
+  const lift = (rr: number) => S * 0.035 * Math.sin(Math.PI * rr) - S * 0.02 * rr * rr;
+  const pattern = (wing: 'fore' | 'hind', th0: number, th1: number) => (rr: number, th: number) => {
+    const u = (th - th0) / (th1 - th0);
+    const vt = u * 7;
+    const vein = rr > 0.1 ? Math.exp(-((vt - Math.round(vt)) ** 2) / 0.0035) : 0; // радиальные жилки
+    const disc = Math.exp(-((rr - 0.42) ** 2) / 0.0008) * (vt > 1.5 && vt < 5 ? 1 : 0); // дискальная ячейка
+    const basal = 0.55 + 0.45 * Math.min(1, rr / 0.35); // основание темнее (опушение)
+    let eye = 1; // глазок: у переднего — к вершине, у заднего — в центре
+    if (g.pattern > 0.4) {
+      const [re, ue] = wing === 'fore' ? [0.74, 0.46] : [0.6, 0.62];
+      const d = Math.hypot(rr - re, (u - ue) * 0.9);
+      eye = d < 0.045 ? 1.5 : d < 0.085 ? 0.22 : d < 0.12 ? 1.3 : 1;
+    }
+    const edge = rr > 0.88 ? 0.35 + 0.9 * Math.max(0, Math.sin(vt * Math.PI * 2 + 1)) ** 6 : 1; // кайма с точками
+    const bs = Math.sin(rr * (5 + g.pattern * 7) + u * 2);
+    const band = g.pattern > 0.2 ? 0.85 + 0.3 * Math.max(-1, Math.min(1, bs * 4)) : 1;
+    return Math.min(1.4, g.reflect905 * 1.2 * basal * (1 - 0.55 * vein) * (1 - 0.4 * disc) * eye * edge * band);
+  };
   for (const side of [-1, 1] as const) {
     const w = new GeoBuilder();
     const out = v(side, 0, 0);
     const fwd = v(0, 0, 1);
-    const fore = (th: number) => S * 0.5 * (0.6 + 0.4 * Math.sin(th * 1.6)) * (0.8 + g.aspect * 0.4);
-    const hind = (th: number) => S * 0.36 * (0.7 + 0.3 * Math.cos(th * 2)) * (1.1 - g.aspect * 0.3);
-    const refl = (rr: number, th: number) => g.reflect905 * stripe(g, rr, th) * (rr > 0.85 ? 1.2 : 1);
-    w.wing(v(0, 0, len * 0.1), fwd, out, fore, 0.05, 1.35, rings, spokes, MAT.insect, refl);
-    w.wing(v(0, 0, -len * 0.05), fwd, out, hind, -1.2, 0.05, rings, spokes, MAT.insect, refl);
+    w.wing(v(0, bodyR * 0.3, len * 0.12), fwd, out, fore, 0.05, 1.35, rings, spokes, MAT.insect, pattern('fore', 0.05, 1.35), lift);
+    w.wing(v(0, bodyR * 0.2, -len * 0.02), fwd, out, hind, -1.25, 0.05, rings, spokes, MAT.insect, pattern('hind', -1.25, 0.05), lift);
     wings.push({ geo: w.build(), side });
   }
   void r;

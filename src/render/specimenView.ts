@@ -1,10 +1,9 @@
 // Детальный скан образца (GDD → Наука): поворотный стол, облако плотнеет, три прохода окраски.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { config } from '../config';
-import { buildAnimal, buildPlant } from '../world/meshes';
+import { buildAnimal, buildPlant, type AnimalParts } from '../world/meshes';
 import { makeRng } from '../world/random';
-import { sampleSurface } from '../world/sample';
+import { sampleSurface, surfaceArea } from '../world/sample';
 import type { Species } from '../world/species';
 
 const VERT = /* glsl */ `
@@ -17,6 +16,7 @@ const VERT = /* glsl */ `
   uniform float uHasLum;
   uniform float uSize;
   uniform float uLook;      // ≥0 — показать проход целиком (титул), иначе по uProgress
+  uniform float uPattern;   // рисунок отражения в монохромном проходе (жилки, глазки)
   varying vec3 vColor;
   varying float vAlpha;
   varying float vDepth;
@@ -41,13 +41,13 @@ const VERT = /* glsl */ `
     vDepth = log2(1.0 + max(-mv.z, 0.0) * 8.0); // образец мелкий: растянуть глубину для контуров
     vec3 n = normalize(normalMatrix * aNormal);
     float facing = abs(n.z);
-    vec3 geo = mix(vec3(0.16, 0.16, 0.17), vec3(0.95, 0.94, 0.9), facing);
+    vec3 geo = mix(vec3(0.16, 0.16, 0.17), vec3(0.95, 0.94, 0.9), facing) * mix(1.0, 0.22 + 0.9 * clamp(aRefl, 0.0, 1.2), uPattern);
     vec3 refl = ramp(aRefl);
     float pulse = 0.6 + 0.4 * sin(uTime * 3.0 + aRand * 20.0);
     vec3 lum = uHasLum > 0.5 ? uLum * (0.5 + pulse * aRefl) : refl * (0.25 + 0.2 * facing); // не светится — приглушённое отражение
     float p = uLook >= 0.0 ? uLook : uProgress * 3.0;
     vec3 c = p < 1.0 ? geo : p < 2.0 ? mix(geo, refl, clamp((p - 1.0) * 3.0, 0.0, 1.0)) : mix(refl, lum, clamp((p - 2.0) * 3.0, 0.0, 1.0));
-    float fresh = smoothstep(shown - 0.03, shown, aRand);        // только что пойманные точки ярче
+    float fresh = uLook >= 0.0 ? 0.0 : smoothstep(shown - 0.03, shown, aRand); // только что пойманные точки ярче
     vColor = c + fresh * 0.6;
     vAlpha = 0.85;
   }
@@ -91,12 +91,15 @@ export class SpecimenView {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
   private holder = new THREE.Group();
-  private points: THREE.Points | null = null;
+  private model = new THREE.Group();
+  private clouds: THREE.Points[] = [];
+  private wings: { pivot: THREE.Group; side: 1 | -1 }[] = [];
   private mat: THREE.ShaderMaterial;
   private spin = 0;
   active = false;
 
   constructor() {
+    this.holder.add(this.model);
     this.scene.add(this.holder);
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
@@ -111,44 +114,60 @@ export class SpecimenView {
         uHasLum: { value: 0 },
         uSize: { value: 2 },
         uLook: { value: -1 },
+        uPattern: { value: 0.5 },
       },
     });
   }
 
   open(s: Species, seed: number): void {
-    let geo: THREE.BufferGeometry;
-    if (s.kingdom === 'plant') {
-      geo = buildPlant(s, seed, 2);
-    } else {
-      const parts = buildAnimal(s, seed, 3);
-      const wings = parts.wings.map((w) => w.geo.clone().rotateZ(w.side * 0.35)); // крылья приподняты
-      geo = mergeGeometries([parts.body, ...wings]);
-    }
-    this.load(geo, seed, s.kingdom === 'animal' ? 0.5 : 0.15, s.genome.lumPeak);
+    if (s.kingdom === 'plant') this.load([{ geo: buildPlant(s, seed, 2) }], seed, 0.15, s.genome.lumPeak);
+    else this.openAnimal(buildAnimal(s, seed, 3), seed, s.genome.lumPeak);
   }
 
-  /** Произвольная геометрия (фон титула: силуэт). */
+  /** Животное по частям: крылья — отдельные облака на шарнирах, машут. */
+  openAnimal(parts: AnimalParts, seed: number, lumPeak = 0, tilt = 0.5, points = config.research.specimenPoints): void {
+    this.load([{ geo: parts.body }, ...parts.wings.map((w) => ({ geo: w.geo, side: w.side }))], seed, tilt, lumPeak, points);
+  }
+
+  /** Произвольная геометрия. */
   openGeometry(geo: THREE.BufferGeometry, seed: number, tilt = 0.05): void {
-    this.load(geo, seed, tilt, 0);
+    this.load([{ geo }], seed, tilt, 0);
   }
 
-  private load(geo: THREE.BufferGeometry, seed: number, tilt: number, lumPeak: number): void {
+  private load(parts: { geo: THREE.BufferGeometry; side?: 1 | -1 }[], seed: number, tilt: number, lumPeak: number, points = config.research.specimenPoints): void {
     this.close();
-    geo.computeBoundingSphere();
-    const bs = geo.boundingSphere!;
-    geo.translate(-bs.center.x, -bs.center.y, -bs.center.z);
-    const n = config.research.specimenPoints;
-    const smp = sampleSurface(geo, n, makeRng(seed ^ 0x51ec));
-    const pg = new THREE.BufferGeometry();
-    pg.setAttribute('position', new THREE.BufferAttribute(smp.pos, 3));
-    pg.setAttribute('aNormal', new THREE.BufferAttribute(smp.nrm, 3));
-    pg.setAttribute('aRefl', new THREE.BufferAttribute(smp.refl, 1));
-    pg.setAttribute('aRand', new THREE.BufferAttribute(smp.rand, 1));
-    this.points = new THREE.Points(pg, this.mat);
-    this.points.frustumCulled = false;
-    this.holder.add(this.points);
+    const box = new THREE.Box3();
+    for (const p of parts) {
+      p.geo.computeBoundingBox();
+      box.union(p.geo.boundingBox!);
+    }
+    const bs = box.getBoundingSphere(new THREE.Sphere());
+    this.model.position.copy(bs.center).negate();
+    const areas = parts.map((p) => surfaceArea(p.geo));
+    const total = areas.reduce((a, b) => a + b, 0) || 1;
+    parts.forEach((p, i) => {
+      const smp = sampleSurface(p.geo, Math.max(200, Math.round((points * areas[i]) / total)), makeRng((seed ^ 0x51ec) + i));
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute('position', new THREE.BufferAttribute(smp.pos, 3));
+      pg.setAttribute('aNormal', new THREE.BufferAttribute(smp.nrm, 3));
+      pg.setAttribute('aRefl', new THREE.BufferAttribute(smp.refl, 1));
+      pg.setAttribute('aRand', new THREE.BufferAttribute(smp.rand, 1));
+      const pts = new THREE.Points(pg, this.mat);
+      pts.frustumCulled = false;
+      if (p.side) {
+        // Шарнир — ось тела (Z): крыло поворачивается вокруг неё.
+        const pivot = new THREE.Group();
+        pivot.add(pts);
+        this.model.add(pivot);
+        this.wings.push({ pivot, side: p.side });
+      } else {
+        this.model.add(pts);
+      }
+      this.clouds.push(pts);
+      p.geo.dispose();
+    });
     this.holder.rotation.set(tilt, 0, 0);
-    const dist = bs.radius / Math.sin(((this.camera.fov / 2) * Math.PI) / 180) * 1.15;
+    const dist = (bs.radius / Math.sin(((this.camera.fov / 2) * Math.PI) / 180)) * 1.15;
     this.camera.position.set(0, 0, dist);
     this.camera.near = dist / 100;
     this.camera.far = dist * 4;
@@ -156,35 +175,41 @@ export class SpecimenView {
     this.mat.uniforms.uHasLum.value = lumPeak ? 1 : 0;
     (this.mat.uniforms.uLum.value as THREE.Color).copy(wavelengthColor(lumPeak || 500));
     this.mat.uniforms.uProgress.value = 0;
-    geo.dispose();
     this.active = true;
   }
 
   close(): void {
-    if (this.points) {
-      this.holder.remove(this.points);
-      this.points.geometry.dispose();
-      this.points = null;
-    }
+    for (const c of this.clouds) c.geometry.dispose();
+    this.model.clear();
+    this.clouds = [];
+    this.wings = [];
     this.active = false;
   }
 
-  /** drag — поворот мышью (рад), progress — 0..1; look ≥ 0 — фиксированный вид прохода (0..3). */
-  update(progress: number, dtMs: number, time: number, drag: number, look = -1): void {
+  /**
+   * drag — поворот мышью (рад), progress — 0..1. opts: look ≥ 0 — фиксированный проход (0..3);
+   * flap — размах взмаха крыльев, рад; yaw/tilt — задать ракурс вместо вращения; pattern — рисунок в монохроме.
+   */
+  update(progress: number, dtMs: number, time: number, drag: number, opts: { look?: number; flap?: number; yaw?: number; tilt?: number; pattern?: number } = {}): void {
     this.spin += dtMs * 0.00035 + drag;
-    this.holder.rotation.y = this.spin;
+    this.holder.rotation.y = opts.yaw ?? this.spin;
+    if (opts.tilt !== undefined) this.holder.rotation.x = opts.tilt;
+    const t = time / 1000;
+    const flap = opts.flap ?? 0.18;
+    for (const w of this.wings) w.pivot.rotation.z = w.side * (0.3 + flap * Math.sin(t * 1.6));
     this.mat.uniforms.uProgress.value = progress;
-    this.mat.uniforms.uTime.value = time / 1000;
-    this.mat.uniforms.uLook.value = look;
+    this.mat.uniforms.uTime.value = t;
+    this.mat.uniforms.uLook.value = opts.look ?? -1;
+    this.mat.uniforms.uPattern.value = opts.pattern ?? 0.5;
   }
 
   /** Подготовить камеру к кадру. shift — сдвиг образца по экрану (доля ширины, + вправо). */
-  prepare(renderer: THREE.WebGLRenderer, shift = 0): void {
+  prepare(renderer: THREE.WebGLRenderer, shift = 0, sizeMul = 1): void {
     const size = renderer.getSize(new THREE.Vector2());
     this.camera.aspect = size.x / size.y;
     if (shift) this.camera.setViewOffset(size.x, size.y, -shift * size.x, 0, size.x, size.y);
     else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
-    this.mat.uniforms.uSize.value = Math.max(1.5, (size.y / 720) * 2.2) * renderer.getPixelRatio();
+    this.mat.uniforms.uSize.value = Math.max(1.2, (size.y / 720) * 2.2 * sizeMul) * renderer.getPixelRatio();
   }
 }
