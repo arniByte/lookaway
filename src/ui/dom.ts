@@ -26,3 +26,21 @@ export const kbd = (k: string) => h('kbd', k);
 
 /** Латинское биномиальное название: курсив с засечками. */
 export const latin = (name: string) => h('span.latin', name);
+
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException('aborted', 'AbortError'));
+    const id = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(id);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+}
+
+/** Позиция на экране (доли) для цели в координатах gaze (−1..1, y вверх). */
+export const gazeToScreen = (x: number, y: number): [number, number] => [(x + 1) / 2, (1 - y) / 2];

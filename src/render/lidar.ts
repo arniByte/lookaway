@@ -103,7 +103,7 @@ const POINT_VERT = /* glsl */ `
     if (sp > 0.5) {
       int si = int(sp) - 1;
       float unknown = si < 16 ? uUnknown[si] : 0.0;
-      float bio = mat > 6.5 ? 1.0 : (mat > 4.5 ? 0.9 : (mat > 3.5 ? 0.55 : 0.3));
+      float bio = mat > 6.5 ? 1.0 : (mat > 4.5 ? 0.9 : (mat > 3.5 ? 0.32 : 0.18)); // листва и кора — лёгкий оттенок, цветы и насекомые — ярко
       col = mix(col, vec3(0.98, 0.70, 0.34) * (0.55 + 0.6 * shadeI), unknown * bio * 0.85);
     }
     // Доплер: движущееся к сканеру — теплее, от него — холоднее.

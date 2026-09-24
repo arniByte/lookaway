@@ -79,10 +79,9 @@ export const config = {
   },
 
   calibration: {
-    settleMs: 600, // не брать кадры в начале шага: глаза ещё едут
-    stepMs: 1800,
+    settleMs: 450, // не брать кадры в начале шага: глаза ещё едут
     blinkCount: 5,
-    blinkStepMs: 6500,
+    blinkStepMs: 5500,
     closedStepMs: 2500,
     // v2: 9 точек сеткой 3×3 на ±gridAt, приём по стабильности взгляда.
     gridAt: 0.75,
@@ -93,10 +92,12 @@ export const config = {
     pointTimeoutMs: 3500,
     ridgeLambda: 0.02,
     maxValidationError: 0.25, // хуже — предложить повтор
-    checkMs: 3500, // живая проверка курсором после калибровки
+    checkMs: 3000, // живая проверка курсором после калибровки
+    // Предпроверка перед точками (калибровка на каждом входе): лицо, свет, расстояние, центр.
+    // Пороги расстояния — оценка для вебкамеры ~60° по горизонтали, не замер. M0
+    precheck: { minSpan: 0.09, maxSpan: 0.24, centerTol: 0.2, holdMs: 1000 },
     minFramesPerStep: 5,
     minSeparation: 0.2, // закрытые − открытые, иначе профиль не принимается (очки, блики)
-    minGazeSpan: 0.03, // M0: минимальный сырой размах L/R от центра, иначе профиль не принимается
     storageKey: 'lookaway.profile.v1',
   },
 

@@ -29,20 +29,7 @@ export function downloadText(filename: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(new DOMException('aborted', 'AbortError'));
-    const id = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(id);
-        reject(new DOMException('aborted', 'AbortError'));
-      },
-      { once: true },
-    );
-  });
-}
+export { gazeToScreen, sleep } from '../ui/dom';
 
 /** Полноэкранный слой для мастера калибровки и записи протоколов. */
 export function fullscreenLayer(): { root: HTMLDivElement; text: HTMLDivElement; dot: HTMLDivElement; destroy(): void } {
@@ -58,5 +45,3 @@ export function placeDot(dot: HTMLElement, fx: number, fy: number): void {
   dot.style.top = `${fy * 100}%`;
 }
 
-/** Позиция на экране (доли) для цели в координатах gaze (−1..1, y вверх). */
-export const gazeToScreen = (x: number, y: number): [number, number] => [(x + 1) / 2, (1 - y) / 2];

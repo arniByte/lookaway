@@ -130,11 +130,11 @@ kbd {
 @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
 .study .foot { margin-top: 16px; color: var(--ink-3); font-size: 12px; }
 
-.journal { position: fixed; inset: 4vh 4vw; z-index: 6; padding: 28px 32px; overflow: auto; opacity: 0; visibility: hidden; transform: translateY(8px); transition: opacity 0.3s var(--ease), transform 0.45s var(--ease), visibility 0s linear 0.3s; background: rgba(8, 8, 8, 0.9); }
+.journal { position: fixed; inset: 4vh 4vw; z-index: 6; padding: 28px 32px; overflow: auto; opacity: 0; visibility: hidden; transform: translateY(8px); transition: opacity 0.3s var(--ease), transform 0.45s var(--ease), visibility 0s linear 0.3s; background: rgba(8, 8, 8, 0.97); }
 .journal.on { opacity: 1; visibility: visible; transform: none; transition: opacity 0.3s var(--ease), transform 0.45s var(--ease), visibility 0s; }
 .journal .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
-.journal canvas { width: 100%; height: 300px; display: block; margin-top: 12px; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin-top: 16px; }
+.journal canvas { width: 100%; display: block; margin-top: 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin-top: 16px; align-items: start; }
 .card { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
 .card .latin { font-size: 18px; }
 .card .sub { color: var(--ink-3); font-size: 13px; margin: 2px 0 10px; }
@@ -146,8 +146,8 @@ kbd {
 /* Калибровка. */
 .calib { position: fixed; inset: 0; z-index: 20; background: #050505; overflow: hidden; opacity: 0; transition: opacity 0.5s var(--ease); }
 .calib.on { opacity: 1; }
-.calib canvas.eyes { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); transition: opacity 0.6s var(--ease), transform 0.8s var(--ease); pointer-events: none; }
-.calib.collect canvas.eyes { opacity: 0.16; }
+.calib > .eyes { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); transition: opacity 0.6s var(--ease); pointer-events: none; }
+.calib.collect > .eyes { opacity: 0.14; }
 .calib .cap { position: absolute; left: 0; right: 0; text-align: center; padding: 0 24px; transition: opacity 0.4s var(--ease); }
 .calib .cap.top { top: 7vh; }
 .calib .cap.bottom { bottom: 7vh; }
@@ -164,3 +164,5 @@ kbd {
 .progress-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--line-2); transition: background 0.3s; }
 .progress-dots i.on { background: var(--ink); }
 .result .big { font: 200 56px/1 var(--sans); margin-top: 12px; }
+.calib.done > .eyes { opacity: 0.14; }
+.calib.done .cap.top { top: 50%; transform: translateY(-50%); }

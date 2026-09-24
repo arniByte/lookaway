@@ -151,6 +151,8 @@ export class FieldApp {
     if (this.busy) return;
     this.busy = true;
     this.sfx.unlock();
+    this.phase = 'loading'; // титул за калибровкой не рисуется
+    this.specimen.close();
     try {
       if (mode !== 'keyboard') {
         this.screens.status('Камера', 'Запускаю камеру и модель…', true);
@@ -176,6 +178,7 @@ export class FieldApp {
     this.specimen.close();
     this.sfx.silence();
     this.controls.unlock();
+    this.screens.paused(false);
     this.screens.status('Генерация мира', `№ ${seed}`, true);
     await new Promise((r) => setTimeout(r, 60)); // дать экрану перерисоваться
     if (this.run) {
@@ -355,6 +358,7 @@ export class FieldApp {
     e.shown = true;
     this.controls.unlock();
     this.hud.visible = false;
+    this.screens.paused(false);
     const docs = r.world.species.filter((s) => r.research.documented.has(s.id));
     this.screens.end({
       dead: e.kind === 'dead',
@@ -437,7 +441,8 @@ export class FieldApp {
     if (!r) return;
     if (this.phase === 'intro') {
       this.placeCamera(r.player);
-      r.lidar.update(performance.now() - this.introAt, this.camera);
+      // Облако за брифом не растворяется, сколько ни читай.
+      r.lidar.update(Math.min(performance.now() - this.introAt, config.lidar.persistMs * config.lidar.fadeFrom * 0.8), this.camera);
       this.composer.render(this.renderer, this.display, this.camera, this.look(now, 0.55));
       return;
     }
@@ -452,6 +457,7 @@ export class FieldApp {
 
     if (this.controls.consumeJournal()) {
       this.journal.toggle(r.research, r.world.species, r.seed);
+      this.hud.visible = !this.journal.open;
       if (this.journal.open) {
         this.controls.unlock();
         r.studyDoneUntil = 0;

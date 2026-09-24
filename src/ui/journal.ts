@@ -2,7 +2,7 @@
 import { cladogram, currentPass, leaves, measurements, PASS_RU, PASSES, type CladeNode, type Research, type Study } from '../game/research';
 import { CLADE_RU, type Species } from '../world/species';
 import { h, latin } from './dom';
-import { INK, SERIF } from './theme';
+import { INK, SANS, SERIF } from './theme';
 
 /** Панель детального скана. DOM строится один раз на образец, дальше обновляются классы и ширины. */
 export class StudyPanel {
@@ -84,7 +84,8 @@ export class Journal {
   private render(r: Research, species: Species[], seed: number): void {
     const docs = species.filter((s) => r.documented.has(s.id));
     const cards = h('div.cards');
-    for (const s of species) {
+    const known = (s: Species) => (r.documented.has(s.id) ? 0 : 1);
+    for (const s of [...species].sort((a, b) => known(a) - known(b))) {
       if (!r.documented.has(s.id)) {
         cards.append(h('div.card.unknown', h('div.kicker', 'Не описан'), h('div.sub', CLADE_RU[s.clade])));
         continue;
@@ -105,6 +106,7 @@ export class Journal {
       ...(docs.length >= 2 ? [this.canvas] : []),
       cards,
     );
+    this.canvas.style.height = `${Math.max(110, docs.length * 38)}px`;
     if (docs.length >= 2) requestAnimationFrame(() => this.drawTree(cladogram(docs)!, species));
   }
 
@@ -134,7 +136,7 @@ export class Journal {
         g.fillText(s.name, x(0) + 12, y + 5);
         const w = g.measureText(s.name).width;
         g.fillStyle = INK(0.4);
-        g.font = `12px ${getComputedStyle(document.documentElement).getPropertyValue('--sans')}`;
+        g.font = `12px ${SANS}`;
         g.fillText(`  ${CLADE_RU[s.clade]}`, x(0) + 12 + w, y + 5);
         g.fillStyle = INK(0.9);
         g.beginPath();
