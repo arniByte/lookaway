@@ -261,7 +261,7 @@ export function generateWorld(seed: number, cfg: Config = defaultConfig): World 
     grass,
     animals,
     beacon,
-    spawn: { x: 0, z: 3, yaw: 0 },
+    spawn: { x: 0, z: 3, yaw: Math.PI }, // спиной к маяку: впереди долина, маяк — засечка на кольце HUD
     darkSpawn,
     colliders,
   };

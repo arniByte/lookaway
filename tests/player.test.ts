@@ -7,7 +7,7 @@ const world = generateWorld(555);
 const grid = colliderGrid(world);
 
 describe('игрок', () => {
-  it('появляется лицом к маяку, идёт вперёд со скоростью ходьбы и считает шаги', () => {
+  it('появляется у маяка, идёт вперёд со скоростью ходьбы и считает шаги', () => {
     const p = createPlayer(world);
     expect(p.z).toBeGreaterThan(world.beacon.z); // маяк впереди (−Z)
     p.yaw = Math.PI; // спиной к маяку: вперёд = +Z

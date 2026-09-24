@@ -58,7 +58,7 @@ const POINT_VERT = /* glsl */ `
 
     vec3 col = mix(vec3(0.06, 0.26, 0.34), vec3(0.72, 0.96, 1.0), clamp(inten, 0.0, 1.0));
     if (mat < 1.5) col *= 0.7;                                   // рельеф тусклее
-    if (mat > 7.5) col = vec3(1.0, 0.82, 0.42) * 1.3;            // маяк
+    if (mat > 7.5) col = vec3(0.85, 0.68, 0.34);                 // маяк (вблизи аддитив и так выжигает)
     if (sp > 0.5) {
       int si = int(sp) - 1;
       float unknown = si < 16 ? uUnknown[si] : 0.0;
@@ -126,6 +126,8 @@ export class Lidar {
   private nextId = 1;
   /** 1 — вид не задокументирован (биосигнатура тёплая). */
   readonly unknown = new Array(16).fill(1);
+  /** Приглушение облака (детальный скан поверх). */
+  dim = 1;
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -231,7 +233,7 @@ export class Lidar {
       const u = s.mat.uniforms;
       u.uAge.value = age / 1000;
       u.uErosion.value = s.erosion;
-      u.uAlpha.value = k < lc.fadeFrom ? 1 : 1 - (k - lc.fadeFrom) / (1 - lc.fadeFrom);
+      u.uAlpha.value = (k < lc.fadeFrom ? 1 : 1 - (k - lc.fadeFrom) / (1 - lc.fadeFrom)) * this.dim;
     }
   }
 
