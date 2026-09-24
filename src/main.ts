@@ -6,7 +6,7 @@ import { Overlay } from './debug/overlay';
 import { Playground } from './debug/playground';
 import { runProtocol } from './debug/protocolRunner';
 import { downloadText } from './debug/ui';
-import { GameApp } from './game/app';
+import { FieldApp } from './game/field';
 import { evaluate, formatReport } from './input/evaluate';
 import { fixtureFromJson, fixtureToJson } from './input/fixture';
 import { defaultProfile } from './input/gaze';
@@ -203,7 +203,7 @@ function makeView(): View {
     return { frame: (s, now, kind) => pg.draw(s, now, kind) };
   }
   overlay.toggle(); // в игре оверлей скрыт до ё
-  return new GameApp(canvas, {
+  return new FieldApp(canvas, {
     async startCamera() {
       const err = await selectSource('tracker');
       if (err) return err;
@@ -212,6 +212,7 @@ function makeView(): View {
     async startKeyboard() {
       await selectSource('fallback');
     },
+    recenter,
   });
 }
 

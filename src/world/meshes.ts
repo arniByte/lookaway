@@ -161,7 +161,7 @@ export function buildTree(g: Genome, r: Rng, detail = 1): THREE.BufferGeometry {
   const barkRefl = 0.25 + g.reflect905 * 0.25;
   const leafRefl = g.reflect905;
   const depth = Math.min(3, g.segments);
-  const leavesPerTip = Math.round(10 * detail);
+  const leavesPerTip = Math.round(16 * detail);
 
   const branch = (from: V3, dir: V3, len: number, rad: number, level: number) => {
     const n = 4;
@@ -180,7 +180,7 @@ export function buildTree(g: Genome, r: Rng, detail = 1): THREE.BufferGeometry {
       for (let k = 0; k < leavesPerTip; k++) {
         const d = randDir(r);
         const root = tip.clone().add(randDir(r).multiplyScalar(0.6 * s + r() * 0.8 * s));
-        const L = (0.18 + g.leafShape * 0.25) * Math.sqrt(s) * range(r, 0.7, 1.3);
+        const L = (0.26 + g.leafShape * 0.3) * Math.sqrt(s) * range(r, 0.7, 1.3);
         b.blade(root, d, perp(d), L, L * (0.9 - g.leafShape * 0.6), v(0, -L * 0.2, 0), 2, MAT.foliage, leafRefl * range(r, 0.85, 1.1), g.leafShape);
       }
       return;
