@@ -29,21 +29,26 @@ src/
       fallbackSource.ts  # мышь/клава
       replaySource.ts    # проигрывание фикстур через gaze
   game/
-    loop.ts
-    director.ts          # пейсинг, blink-cut, детерминирован от seed
-    dryness.ts
-    entities/            # mannequin.ts, ... (поведения)
-    level.ts
+    sim.ts               # грейбокс-симуляция: свет, шаги, пригвождение, скан, смерть/рассвет (чистая, детерминирована)
+    loop.ts              # фиксированный шаг + доставка событий EyeState
+    level.ts             # дорожки, комната, пропсы — общие для sim, рендера и лидара
+    rng.ts
+    app.ts               # титул → вступление → игра → финал, hands-free старт
+    director.ts          # (M6) пейсинг, blink-cut, детерминирован от seed
+    dryness.ts           # (M3)
   render/
-    pipeline.ts          # low-res RT, пост
-    flashlight.ts
-    periphery.ts         # dissolve-материал
-    lidarEyes.ts         # окно глаз
-    lidarWorld.ts        # лидар-зрение при закрытых глазах
-  audio/
+    greybox.ts           # M1: комната, манекены, фонарик
+    mannequin.ts         # манекен из боксов + дискретные позы
+    lidarWorld.ts        # эхо-скан и послеобраз
+    pipeline.ts          # (M5) low-res RT, пост
+    periphery.ts         # (M4) dissolve-материал
+    lidarEyes.ts         # (M2) окно глаз
+  ui/screens.ts          # титул, вступление, пауза, финал
+  audio/sfx.ts           # синтезированный звук грейбокса
   debug/                 # оверлей, мастер калибровки, запись протоколов, M0-площадка
 tests/
   synthetic.ts           # генератор RawFrame-потоков с известной разметкой
+  bots.ts                # боты-стратегии для проверки баланса (balance.test.ts)
   fixtures/*.json        # записанные с камеры (RawFrame + cues)
 ```
 
@@ -191,7 +196,7 @@ Uniform `gazeDir` — направление луча. Для периферий
 **Лидар мира (эхо-скан, GDD → Лидар).** Логика скана — в симуляции (`game/sim.ts`): импульсы, растущий радиус, снимок позиций на последнем импульсе. Звук эха — `audio/`, задержка и тон от дистанции. Картинка — `render/lidarWorld.ts`: облака точек уровня и врагов по снимку, показываются во время `closed` (для зрителей) и как гаснущий послеобраз после `closeEnd`. В грейбоксе точки сэмплируются вручную по боксам, в M3 — через `MeshSurfaceSampler` (`three/examples/jsm/math`).
 
 ## Аудио
-- `THREE.AudioListener` + `PositionalAudio`.
+- Грейбокс (M1): синтез WebAudio без ассетов, сторона — `StereoPannerNode` по дорожке. С M6 — `THREE.AudioListener` + `PositionalAudio`.
 - Враги звучат только при движении.
 - Сердцебиение = f(близость ближайшего врага, сухость).
 - AudioContext запускается по первому жесту пользователя (политика браузеров). Удобно совместить с экраном калибровки.

@@ -62,6 +62,9 @@ export const config = {
   fallback: {
     blinkMs: 150,
     zoneDwellMs: 0,
+    // Непроизвольные моргания без камеры: иначе на клавиатуре моргаешь только когда выгодно,
+    // а «моргание нельзя отменить» — столп GDD. 0 — выключить (доступность).
+    autoBlinkPerMin: 10,
   },
 
   calibration: {
@@ -90,6 +93,44 @@ export const config = {
 
   debug: {
     graphSeconds: 6,
+  },
+
+  // M1 грейбокс. Баланс проверяется ботами (tests/balance.test.ts), потом — людьми.
+  game: {
+    simHz: 60,
+    maxFrameMs: 250, // вкладка спала — не догонять симуляцию рывком
+    surviveMs: 75_000, // «до рассвета»
+    startDist: [9, 11] as [number, number],
+    startGraceMs: 2500, // первые шаги не раньше: дать оглядеться
+    killDist: 1.3,
+    stepLen: 0.5,
+    stepIntervalMs: [1400, 2400] as [number, number], // шаг в темноте раз в столько
+    unlitGraceMs: 400, // луч ушёл — первый шаг не раньше чем через столько
+    blinkStepLen: 0.35, // «бесплатный шаг» всем на blinkStart
+    blinkSafeMargin: 0.6, // моргание не подводит ближе killDist + margin (GDD: blink не убивает)
+    pinMs: 2000, // «пригвоздить»: столько под светом до моргания — и на склейке он отступает
+    pushBack: 3.5, // м, на сколько отступает пригвождённый (не дальше startDist[1])
+    resumeGraceMs: 1500, // после возврата сигнала
+    beamTauMs: 110, // инерция луча
+    beamShake: 0.15, // доля остаточного шума взгляда в луче — «дрожь руки»
+    beamYMix: 0.3,
+    litHalfWidth: 0.25, // в единицах gaze.x: полоса, где луч освещает дорожку
+    scan: {
+      firstSweepMs: 250, // от closeStart до первого импульса
+      sweepMs: 800,
+      baseRange: 4, // м, радиус первого импульса
+      rangePerSweep: 4, // м, прирост радиуса за импульс
+      echoBaseMs: 60,
+      echoMsPerMeter: 30, // задержка эха от дистанции
+      afterimageMs: 900,
+    },
+  },
+
+  render: {
+    hfovDeg: 90, // горизонтальный FOV постоянный: дорожки в центрах зон при любом aspect
+    eyeHeight: 1.6,
+    deathFlickerMs: [150, 200, 300], // вкл/выкл/вкл: 2 вспышки < 3 Гц (WCAG 2.3.1)
+    endScreenDelayMs: 1200,
   },
 };
 
