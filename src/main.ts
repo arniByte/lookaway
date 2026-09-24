@@ -1,4 +1,5 @@
-// Точка входа: грейбокс M1 (по умолчанию) или площадка трекинга M0 (?m0). Debug-оверлей — в обоих.
+// Точка входа: игра (по умолчанию) или площадка трекинга M0 (?m0). Debug-оверлей — в обоих.
+import './ui/theme.css';
 import { config } from './config';
 import { runCalibration, runRecenter } from './debug/calibrationWizard';
 import { unlockAudio } from './debug/beep';

@@ -3,7 +3,7 @@ import { config } from '../src/config';
 import { createDark, hearPulse, stepDark, type DarkCtx } from '../src/game/darkMatter';
 import { createFauna, hostIndex, stepFauna } from '../src/game/fauna';
 import { advanceStudy, cladogram, createResearch, leaves, measurements, startStudy } from '../src/game/research';
-import { chargeScanner, createScanner, tryPulse } from '../src/game/scanner';
+import { chargeScanner, createScanner, pulseRange, releasePulse, scanPower } from '../src/game/scanner';
 import { makeRng } from '../src/world/random';
 import { generateWorld } from '../src/world/worldgen';
 
@@ -13,14 +13,39 @@ const DT = 1000 / 60;
 describe('сканер', () => {
   it('заряжается за cooldown, с закрытыми глазами — вдвое быстрее', () => {
     const s = createScanner();
-    expect(tryPulse(s)).toBe(true);
-    expect(tryPulse(s)).toBe(false);
+    expect(releasePulse(s)).not.toBeNull();
+    expect(releasePulse(s)).toBeNull();
     for (let t = 0; t < config.scanner.cooldownMs / 2; t += DT) chargeScanner(s, DT, true);
     expect(s.charge).toBeGreaterThanOrEqual(0.99);
     const o = createScanner();
-    tryPulse(o);
+    releasePulse(o);
     for (let t = 0; t < config.scanner.cooldownMs / 2; t += DT) chargeScanner(o, DT, false);
     expect(o.charge).toBeCloseTo(0.5, 1);
+  });
+
+  it('дольше закрыты глаза — мощнее импульс; накопление только при полном заряде', () => {
+    const s = createScanner();
+    for (let t = 0; t < config.scanner.holdFullMs / 2; t += DT) chargeScanner(s, DT, true);
+    expect(scanPower(s)).toBeCloseTo(0.5, 1);
+    const half = releasePulse(s)!;
+    for (let t = 0; t < config.scanner.holdFullMs * 2; t += DT) chargeScanner(s, DT, true);
+    expect(s.charge).toBe(1);
+    // Пока заряжался, мощность не копилась: только время после полного заряда.
+    expect(scanPower(s)).toBeLessThan(1);
+    for (let t = 0; t < config.scanner.holdFullMs * 2; t += DT) chargeScanner(s, DT, true);
+    const full = releasePulse(s)!;
+    expect(full).toBe(1);
+    expect(pulseRange(full, 0)).toBeGreaterThan(pulseRange(half, 0));
+    expect(pulseRange(0, 0)).toBe(config.scanner.rangeMin);
+    expect(pulseRange(1, 4)).toBe(config.scanner.rangeMax + 4 * config.scanner.rangePerSpecies);
+  });
+
+  it('открыл глаза без заряда — импульса нет, накопление сброшено', () => {
+    const s = createScanner();
+    releasePulse(s);
+    chargeScanner(s, 500, true);
+    expect(releasePulse(s)).toBeNull();
+    expect(s.hold).toBe(0);
   });
 });
 
@@ -196,15 +221,17 @@ describe('исследование', () => {
 });
 
 describe('hands-free (режим B)', async () => {
-  const { HandsFree } = await import('../src/game/controls');
+  const { HandsFree, eyePulse } = await import('../src/game/controls');
   const eye = (over: Partial<import('../src/input/types').EyeState>): import('../src/input/types').EyeState => ({
     t: 0, confidence: 1, lost: false, gaze: { x: 0, y: 0 }, zone: 'C', blink: false, closed: false, wink: null, wide: 0, squint: 0, events: [], ...over,
   });
 
-  it('закрытые глаза — идёшь; открыл — импульс', () => {
+  it('закрытые глаза — идёшь и копишь импульс; открыл — импульс; моргание — нет', () => {
     const hf = new HandsFree();
     expect(hf.update(eye({ closed: true }), 16, false).input.forward).toBe(1);
-    expect(hf.update(eye({ events: ['closeEnd'] }), 16, false).scan).toBe(true);
+    expect(eyePulse(eye({ closed: true })).charging).toBe(true);
+    expect(eyePulse(eye({ events: ['closeEnd'] })).release).toBe(true);
+    expect(eyePulse(eye({ blink: true, events: ['blinkStart', 'blinkEnd'] }))).toEqual({ charging: false, release: false });
     expect(hf.update(eye({ blink: true }), 16, false).input.forward).toBe(0);
   });
 
@@ -229,8 +256,9 @@ describe('hands-free (режим B)', async () => {
 
   it('потеря сигнала — ничего не делает (никогда не «закрытые глаза»)', () => {
     const hf = new HandsFree();
-    const r = hf.update(eye({ lost: true, closed: true, events: ['closeEnd'] }), 16, true);
+    const lost = eye({ lost: true, closed: true, events: ['closeEnd'] });
+    const r = hf.update(lost, 16, true);
     expect(r.input.forward).toBe(0);
-    expect(r.scan).toBe(false);
+    expect(eyePulse(lost)).toEqual({ charging: false, release: false });
   });
 });

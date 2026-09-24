@@ -29,3 +29,8 @@ export function gauss(r: Rng): number {
   const u = Math.max(r(), 1e-9);
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r());
 }
+
+/** «Мир дня»: одинаковый у всех в эту дату (локальную) — ГГГГММДД. */
+export function dailySeed(d = new Date()): number {
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}

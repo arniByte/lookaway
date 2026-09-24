@@ -1,89 +1,147 @@
-// Экраны вне игры: титул, вступление, пауза, финал. Во время игры HUD нет (GDD → Столпы).
-import { button, el } from '../debug/ui';
+// Экраны вне игры: титул, бриф, загрузка, финал, пауза потери сигнала. Переходы — кроссфейд.
+import { btn, h, kbd, latin, type Child } from './dom';
+
+export interface TitleOpts {
+  onCamera(): void;
+  onKeyboard(): void;
+  onHandsFree(): void;
+  onDaily(): void;
+  daily: string; // подпись «мира дня»
+  message?: string;
+}
+
+export interface BriefOpts {
+  seed: number;
+  daily: boolean;
+  goal: number;
+  camera: boolean;
+  handsFree: boolean;
+}
+
+export interface EndOpts {
+  dead: boolean;
+  time: string;
+  documented: { name: string; ru: string }[];
+  total: number;
+  pulses: number;
+  seed: number;
+  camera: boolean;
+  onNew(): void;
+  onSame(): void;
+}
 
 export class Screens {
-  private root: HTMLDivElement;
-  private body: HTMLDivElement;
-  private noise: HTMLCanvasElement;
-  private noiseLabel: HTMLDivElement;
-  private noiseTimer = 0;
+  private current: HTMLElement | null = null;
+  private lostEl: HTMLElement;
 
   constructor() {
-    this.body = el('div', 'max-width:640px;padding:0 20px;text-align:center;white-space:pre-wrap;line-height:1.6;font-size:16px;color:#bbb');
-    this.root = el(
-      'div',
-      'position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:5;background:rgba(0,0,0,.82)',
-      this.body,
+    this.lostEl = h(
+      'div.lost.ui',
+      h('div', h('div.kicker.accent', 'Сигнал потерян'), h('div.h2', 'Пауза'), h('p', 'Лицо не видно или слишком темно. Добавь света на лицо — игра продолжится сама.')),
     );
-    this.noise = el('canvas', 'position:fixed;inset:0;width:100%;height:100%;image-rendering:pixelated;z-index:4;display:none;opacity:.55');
-    this.noise.width = 160;
-    this.noise.height = 90;
-    this.noiseLabel = el(
-      'div',
-      'position:fixed;left:0;right:0;top:45%;text-align:center;z-index:4;display:none;color:#ddd;font-size:18px;text-shadow:0 0 6px #000',
-      'Сигнал потерян.\nЛицо не видно или слишком темно — добавь света на лицо.',
-    );
-    this.noiseLabel.style.whiteSpace = 'pre-wrap';
-    document.body.append(this.noise, this.noiseLabel, this.root);
+    document.body.append(this.lostEl);
+  }
+
+  private show(cls: string, ...content: Child[]): HTMLElement {
+    const next = h('div.screen.ui', h('div.inner', ...content));
+    for (const c of cls.split(' ')) if (c) next.classList.add(c);
+    document.body.append(next);
+    void next.offsetWidth; // зафиксировать начальное состояние для перехода
+    next.classList.add('on');
+    this.retire();
+    this.current = next;
+    return next;
+  }
+
+  private retire(): void {
+    const old = this.current;
+    if (!old) return;
+    old.classList.remove('on');
+    setTimeout(() => old.remove(), 600);
+    this.current = null;
   }
 
   hide(): void {
-    this.root.style.display = 'none';
+    this.retire();
   }
 
-  text(content: string, extra: HTMLElement[] = []): void {
-    this.body.replaceChildren(content, ...extra);
-    this.root.style.display = 'flex';
-  }
-
-  title(onCamera: () => void, onKeyboard: () => void, message = '', onHandsFree?: () => void): void {
-    const row = el('div', 'display:flex;gap:12px;justify-content:center;margin-top:28px;flex-wrap:wrap');
-    const bs = [button('Играть с камерой', onCamera), button('Мышь и клавиатура', onKeyboard)];
-    if (onHandsFree) bs.push(button('Hands-free (эксперимент)', onHandsFree));
-    for (const b of bs) b.style.cssText += ';padding:10px 18px;font-size:15px';
-    row.append(...bs);
-    this.text('', [
-      el('div', 'font-size:34px;letter-spacing:.35em;color:#eee;margin-bottom:8px', 'LOOK AWAY'),
-      el('div', 'letter-spacing:.3em;color:#6cf;margin-bottom:24px', 'ПОЛЕВОЙ ЛИДАР'),
-      el(
-        'div',
-        '',
-        'Миры без света. Ты видишь только то, что отсканировал, — и только пока помнишь.\n' +
-          'Изучай местную жизнь. Тебя ищет чёрная материя.\n\n' +
-          'Камера: моргание стирает скан, взгляд держит угрозу. Видео обрабатывается только на этом устройстве.\n' +
-          'Лучше в наушниках и в темноте, но так, чтобы экран освещал лицо.',
+  title(o: TitleOpts): void {
+    this.show(
+      'title clear',
+      h(
+        'div.col',
+        h('div.kicker', 'Полевой лидар · экспедиция'),
+        h('h1.display', 'LOOK AWAY'),
+        h('p.lede', 'Долина без света. Ты видишь только то, что отсканировал, — и только пока помнишь. Опиши местную жизнь. Тебя ищет чёрная материя.'),
+        h('div.row.actions', btn('Начать с камерой', o.onCamera, 'primary'), btn('Без камеры', o.onKeyboard)),
+        h('div.row.links', btn(o.daily, o.onDaily, 'link'), btn('Только глазами · эксперимент', o.onHandsFree, 'link')),
+        o.message ? h('div.msg', o.message) : null,
       ),
-      row,
-      el('div', 'margin-top:18px;color:#c96', message),
-      el('div', 'margin-top:28px;color:#555;font-size:12px', '` (ё) — debug'),
-    ]);
+      h(
+        'div.foot.small.muted',
+        h('span', 'Видео с камеры обрабатывается только на этом устройстве и никуда не отправляется.'),
+        h('span', 'Лучше в наушниках, в полутьме, чтобы экран освещал лицо'),
+      ),
+    );
   }
 
-  /** Пауза при потере сигнала: статика вместо мира (TECH → Потеря сигнала). */
+  status(kicker: string, text: string, bar = false): void {
+    this.show('loading', h('div.kicker', kicker), h('div.h2', text), bar ? h('div.bar', h('i')) : null);
+  }
+
+  brief(o: BriefOpts): void {
+    const item = (k: string, t: string) => h('div.item', h('div.kicker', k), h('p', t));
+    const key = (keys: (string | HTMLElement)[], label: string, hl = false) => [
+      h('div', ...keys.map((k) => (typeof k === 'string' ? kbd(k) : k))),
+      h(hl ? 'div.hl' : 'div', label),
+    ];
+    const eyes = h('span.small', 'закрыть глаза');
+    const keys = [
+      ...(o.camera ? key([eyes], 'импульс: закрой глаза, открой — скан. Дольше — дальше.', true) : key(['ЛКМ', 'F', 'C'], 'удерживать — копить импульс, отпустить — скан', true)),
+      ...(o.handsFree ? key([h('span.small', 'глаза закрыты')], 'идти вперёд вслепую') : key(['W', 'A', 'S', 'D'], 'идти · Shift — бежать')),
+      ...(o.handsFree ? key([h('span.small', 'взгляд у края')], 'повернуться') : key([h('span.small', 'мышь')], 'обзор · ← → тоже')),
+      ...(o.handsFree ? key([h('span.small', 'взгляд на цели')], 'взять образец') : key(['E'], 'взять образец · эвакуация')),
+      ...key(['Tab'], 'журнал'),
+      ...key(['V'], 'палитра облака'),
+      ...(o.camera ? key(['R'], 'перецентровать взгляд') : key(['Space'], 'моргнуть (глаза моргают и сами)')),
+    ];
+    this.show(
+      'brief',
+      h('div.kicker', `${o.daily ? 'Мир дня' : 'Экспедиция'} · № ${o.seed}`),
+      h('div.h2', `Опиши ${o.goal} видов и вернись к маяку.`),
+      h(
+        'div.grid',
+        h(
+          'div',
+          item('Сканер', 'Закрой глаза — сканер копит импульс. Открой — увидишь долину. Чем дольше темнота, тем дальше видно.'),
+          item('Память', 'Облако держится, пока не моргаешь. Каждое моргание стирает его часть.'),
+          item('Жизнь', 'Янтарные точки — неописанные виды. Подойди и возьми образец: детальный скан занимает несколько секунд.'),
+          item('Угроза', 'Импульс слышит чёрная материя. В облаке она — пустота, вокруг которой гнётся пространство. Посмотри на неё — замрёт. Ненадолго.'),
+        ),
+        h('div.keys', ...keys),
+      ),
+      h('div.go', h('i.pulse-dot'), h('span', o.camera ? 'Закрой и открой глаза — или кликни, чтобы начать' : 'Кликни или нажми Enter, чтобы начать')),
+    );
+  }
+
+  end(o: EndOpts): void {
+    const stat = (k: string, v: string) => h('div.stat', h('div.kicker', k), h('div.v', v));
+    this.show(
+      'end',
+      h(o.dead ? 'div.kicker.danger' : 'div.kicker.accent', o.dead ? 'Контакт потерян' : 'Экспедиция завершена'),
+      h('div.h2', o.dead ? 'Чёрная материя.' : 'Эвакуация.'),
+      h('div.stats', stat('Время', o.time), stat('Описано', `${o.documented.length} / ${o.total}`), stat('Импульсов', String(o.pulses)), stat('Мир', String(o.seed))),
+      h('hr.rule'),
+      o.documented.length
+        ? h('div.species-list', ...o.documented.map((s) => h('div.sp', latin(s.name), h('span.muted.small', s.ru))))
+        : h('div.muted', 'Ни один вид не описан.'),
+      h('div.row.actions', btn('Новый мир', o.onNew, 'primary'), btn('Этот же мир', o.onSame)),
+      h('div.small.muted.hint', o.camera ? 'Enter — новый мир · R — этот же · или закрой и открой глаза' : 'Enter — новый мир · R — этот же'),
+    );
+  }
+
+  /** Пауза при потере сигнала (TECH → Потеря сигнала). */
   paused(on: boolean): void {
-    this.noise.style.display = on ? 'block' : 'none';
-    this.noiseLabel.style.display = on ? 'block' : 'none';
-    if (!on) {
-      cancelAnimationFrame(this.noiseTimer);
-      this.noiseTimer = 0;
-      return;
-    }
-    if (this.noiseTimer) return;
-    const ctx = this.noise.getContext('2d')!;
-    let last = 0;
-    const draw = (now: number) => {
-      if (now - last > 90) {
-        last = now;
-        const img = ctx.createImageData(this.noise.width, this.noise.height);
-        for (let i = 0; i < img.data.length; i += 4) {
-          const v = Math.random() * 110;
-          img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-          img.data[i + 3] = 255;
-        }
-        ctx.putImageData(img, 0, 0);
-      }
-      this.noiseTimer = requestAnimationFrame(draw);
-    };
-    this.noiseTimer = requestAnimationFrame(draw);
+    this.lostEl.classList.toggle('on', on);
   }
 }

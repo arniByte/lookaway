@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAnimal, buildBeacon, buildGrass, buildPlant, buildRock, tagSpecies } from '../src/world/meshes';
+import { buildAnimal, buildBeacon, buildGrass, buildLog, buildPebble, buildPlant, buildRock, buildShrub, buildStump, tagSpecies } from '../src/world/meshes';
 import { makeRng } from '../src/world/random';
 import { generateSpecies } from '../src/world/species';
 import type * as THREE from 'three';
@@ -41,6 +41,10 @@ describe('меши из генома', () => {
     check(buildGrass(makeRng(1)), 200);
     check(buildRock(9, 1.2), 400);
     check(buildBeacon(), 1000);
+    check(buildLog(3, 4, 0.25), 400);
+    check(buildStump(4, 0.3), 300);
+    check(buildShrub(makeRng(5), 0.8), 1200);
+    check(buildPebble(makeRng(6), 0.1), 60);
     const g = tagSpecies(buildGrass(makeRng(2)), 4);
     expect((g.getAttribute('aSpecies').array as Float32Array)[0]).toBe(5);
   });
