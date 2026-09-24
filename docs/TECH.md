@@ -3,7 +3,7 @@
 ## Stack
 - **Vite + TypeScript (strict).**
 - **three.js (WebGL2).** Постпроцесс собираем своими пассами.
-- **`@mediapipe/tasks-vision` → FaceLandmarker.** Параметры: `runningMode: "VIDEO"`, `outputFaceBlendshapes: true`, `outputFacialTransformationMatrixes: true`, `numFaces: 1`.
+- **`@mediapipe/tasks-vision` → FaceLandmarker.** Параметры: `runningMode: "VIDEO"`, `outputFaceBlendshapes: true`, `numFaces: 1`. `outputFacialTransformationMatrixes: false`: поворот головы берём из landmarks (см. «Сигналы»).
   - Версия закреплена в `package.json` (exact).
   - Модель `.task` и wasm хостятся локально в `public/mediapipe/`, не тянутся с CDN в рантайме: работает оффлайн и предсказуемо. В git не лежат: `scripts/setup-mediapipe.mjs` копирует wasm из `node_modules` и скачивает модель с проверкой sha256.
 - **Vitest** для логики (gaze, blink, директор) на фикстурах.
@@ -147,7 +147,7 @@ export interface EyeSource {
 ### Фикстуры и протоколы
 Фикстура = поток `RawFrame` + метки-сигналы (cues) + профиль калибровки + условия (очки, свет). Записывается по протоколу из `protocols.ts`: игроку дают звуковой и визуальный сигнал («моргни», «смотри влево», «закрой глаза», «закрой камеру рукой»), и время сигнала пишется в фикстуру. Так у фикстуры есть разметка, и `evaluate.ts` считает метрики без ручной проверки: сколько сигналов поймано, сколько лишних срабатываний, правильная ли зона. Критерии — в `config.acceptance`.
 
-Кадры хранятся колонками с округлением до 3 знаков: минута записи весит ~250 КБ.
+Кадры хранятся колонками с округлением до 3 знаков: минута записи весит ~200 КБ.
 
 Синтетика (`tests/synthetic.ts`) генерирует такие же потоки с известной разметкой и шумом. Это страховка для логики, но не замена живым фикстурам: реальный шум MediaPipe синтетика не знает.
 
