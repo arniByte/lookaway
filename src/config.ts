@@ -13,6 +13,8 @@ export const config = {
     wasmPath: 'mediapipe/wasm',
     lumaEveryNFrames: 5,
     lumaSize: { w: 32, h: 24 },
+    // Трекер и рендер делят кадр: при просадке рендера снижаем частоту трекинга (CLAUDE.md → Грабли).
+    adaptive: { minHz: 15, lowFps: 50, highFps: 57, stepHz: 5, holdMs: 2000 },
   },
 
   signal: {
@@ -37,6 +39,15 @@ export const config = {
     closedMsRange: [350, 900] as const,
     closedMsPerBlink: 2.5, // closedMs = медиана моргания × k, в пределах closedMsRange
     squintFrom: 0.15, // M0: начало полосы прищура по среднему score
+    // Пороги из шума: on ≥ open + k·σ (в нормированных единицах), в пределах диапазонов.
+    noiseSigmaOn: 6,
+    noiseSigmaOff: 3,
+    onRange: [0.4, 0.8] as [number, number],
+    offRange: [0.2, 0.6] as [number, number],
+    // Baseline открытых глаз догоняет свет и усталость; только пока веки уверенно открыты.
+    noisyConfirmSigma: 0.1, // σ нормированного сигнала выше — подтверждать моргание 2 кадрами (+1 кадр латентности)
+    baselineTauMs: 20_000,
+    baselineMaxDrift: 0.5, // доля от (закрыты − открыты при калибровке)
     winkAsym: 0.4,
     winkMinMs: 150,
     swapLR: false, // M0: true, если eyeBlinkLeft оказался правым глазом игрока
@@ -70,9 +81,19 @@ export const config = {
   calibration: {
     settleMs: 600, // не брать кадры в начале шага: глаза ещё едут
     stepMs: 1800,
-    blinkCount: 3,
-    blinkStepMs: 4500,
+    blinkCount: 5,
+    blinkStepMs: 6500,
     closedStepMs: 2500,
+    // v2: 9 точек сеткой 3×3 на ±gridAt, приём по стабильности взгляда.
+    gridAt: 0.75,
+    validateAt: 0.4, // точки валидации (±, ±)
+    stableWindow: 8, // кадров в окне стабильности
+    stableStd: 0.05, // M0: макс. СКО сырых осей в окне (саккада ≫ шум)
+    minStableFrames: 14,
+    pointTimeoutMs: 3500,
+    ridgeLambda: 0.02,
+    maxValidationError: 0.25, // хуже — предложить повтор
+    checkMs: 3500, // живая проверка курсором после калибровки
     minFramesPerStep: 5,
     minSeparation: 0.2, // закрытые − открытые, иначе профиль не принимается (очки, блики)
     minGazeSpan: 0.03, // M0: минимальный сырой размах L/R от центра, иначе профиль не принимается
@@ -95,42 +116,100 @@ export const config = {
     graphSeconds: 6,
   },
 
-  // M1 грейбокс. Баланс проверяется ботами (tests/balance.test.ts), потом — людьми.
   game: {
-    simHz: 60,
+    simHz: 60, // фиксированный шаг симуляции (TECH → Директор)
     maxFrameMs: 250, // вкладка спала — не догонять симуляцию рывком
-    surviveMs: 75_000, // «до рассвета»
-    startDist: [9, 11] as [number, number],
-    startGraceMs: 2500, // первые шаги не раньше: дать оглядеться
-    killDist: 1.3,
-    stepLen: 0.5,
-    stepIntervalMs: [1400, 2400] as [number, number], // шаг в темноте раз в столько
-    unlitGraceMs: 400, // луч ушёл — первый шаг не раньше чем через столько
-    blinkStepLen: 0.35, // «бесплатный шаг» всем на blinkStart
-    blinkSafeMargin: 0.6, // моргание не подводит ближе killDist + margin (GDD: blink не убивает)
-    pinMs: 2000, // «пригвоздить»: столько под светом до моргания — и на склейке он отступает
-    pushBack: 3.5, // м, на сколько отступает пригвождённый (не дальше startDist[1])
-    resumeGraceMs: 1500, // после возврата сигнала
-    beamTauMs: 110, // инерция луча
-    beamShake: 0.15, // доля остаточного шума взгляда в луче — «дрожь руки»
-    beamYMix: 0.3,
-    litHalfWidth: 0.25, // в единицах gaze.x: полоса, где луч освещает дорожку
-    scan: {
-      firstSweepMs: 250, // от closeStart до первого импульса
-      sweepMs: 800,
-      baseRange: 4, // м, радиус первого импульса
-      rangePerSweep: 4, // м, прирост радиуса за импульс
-      echoBaseMs: 60,
-      echoMsPerMeter: 30, // задержка эха от дистанции
-      afterimageMs: 900,
-    },
   },
 
-  render: {
-    hfovDeg: 90, // горизонтальный FOV постоянный: дорожки в центрах зон при любом aspect
+  // v2: процедурная долина (GDD → Мир).
+  world: {
+    radius: 105, // м, проходимая часть долины
+    spawnClearing: 12, // м, поляна вокруг маяка
+    hillHeight: 7,
+    rimHeight: 30, // обрыв по краю
+    variantsPerSpecies: 3, // разных мешей на вид (инстансы вращаются и масштабируются)
+    rockCount: 140,
+    treeCell: 5,
+    treeDensity: 0.5,
+    fernCell: 3,
+    fernDensity: 0.28,
+    flowerClusters: 26,
+    fungusPatches: 40,
+    grassCell: 1.7,
+    grassDensity: 0.45,
+    animalsPerSpecies: 9,
+    darkMinDist: 70, // чёрная материя появляется не ближе
+    terrainStep: 1, // м, шаг сетки рельефа
+    tileSize: 40, // м, тайл слитой статики (отсечение при снимке)
+  },
+
+  // v2: чёрная материя (GDD → Чёрная материя).
+  dark: {
+    radius: 1.1,
+    hearing: 80, // м: слышит импульс
+    senseRadius: 8, // м: ближе — идёт прямо на игрока
+    speed: 1.25, // м/с (игрок идёт 2.2)
+    driftMul: 0.35, // без цели медленно дрейфует к игроку
+    closedMul: 2, // пока глаза закрыты
+    blinkLeap: 1.5, // м, рывок на моргании
+    safeDist: 4, // рывок не подводит ближе (моргание не убивает)
+    killDist: 1.4,
+    holdMaxMs: 4000, // держать взглядом не дольше
+    holdResetMs: 2000, // отвёл взгляд на столько — «привыкание» сброшено
+    gazeHoldAngle: 0.21, // рад (~12°) между взглядом и направлением на неё
+  },
+
+  fauna: {
+    fleeRadius: 15, // м: пугливые разлетаются от импульса
+  },
+
+  research: {
+    studyMs: 7000, // детальный скан: три прохода
+    documentGoal: 6, // видов до эвакуации
+    reachPlant: 2.0, // м
+    reachAnimal: 1.6, // м до настоящей позиции насекомого
+    extractRadius: 3, // м от маяка
+    specimenPoints: 60_000, // точек в детальном скане
+  },
+
+  // v2: лидар (GDD → Лидар). Точек на скан — главный рычаг производительности.
+  lidar: {
+    points: 260_000,
+    cubeSize: 512, // грань кубической карты глубины: 0.18° на пиксель
+    range: 36, // м
+    waveSpeed: 42, // м/с, фронт волны
+    persistMs: 14_000, // сколько живёт облако без морганий
+    fadeFrom: 0.65, // доля persistMs, после которой облако гаснет
+    maxScans: 3,
+    blinkErase: 0.35, // доля оставшихся точек, которую стирает одно моргание
+    pointScale: 2.4, // размер точки ≈ scale / дистанция, пикс.
+    lensAngle: 0.22, // рад: радиус линзирования вокруг чёрной материи
+    lensStrength: 1.4, // м: насколько тянет точки к центру
+    horizonBias: 0.55, // 0 — равномерно по сфере, 1 — всё у горизонта
+  },
+
+  scanner: {
+    cooldownMs: 6000,
+    closedRechargeMul: 2, // с закрытыми глазами заряжается быстрее (GDD → Основной цикл)
+  },
+
+  player: {
     eyeHeight: 1.6,
-    deathFlickerMs: [150, 200, 300], // вкл/выкл/вкл: 2 вспышки < 3 Гц (WCAG 2.3.1)
-    endScreenDelayMs: 1200,
+    walk: 2.2, // м/с
+    run: 3.8,
+    radius: 0.35,
+    mouseSens: 0.0022,
+    keyTurn: 0.035, // рад за кадр стрелками
+  },
+
+  // Режим B (GDD → Управление): всё глазами. Эксперимент.
+  handsFree: {
+    edge: 0.7, // |gaze.x| дальше — поворот
+    turn: 0.03, // рад за кадр на краю
+    edgeY: 0.8,
+    look: 0.012,
+    dwellMs: 1500, // взгляд в центре при подсказке — взять образец / эвакуация
+    dwellRadius: 0.3,
   },
 };
 

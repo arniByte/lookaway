@@ -85,6 +85,12 @@ export interface CalibrationProfile {
   h: { left: number; center: number; right: number }; // сырой gaze по X в точках калибровки
   v: { down: number; center: number; up: number };
   closedMs: number;
+  /** v2: регрессия взгляда по gazeFeatures(). Нет — работает mapAxis по h/v (профиль v1). */
+  map?: { x: number[]; y: number[] };
+  /** v2: персональные пороги век (нормированный score) из шума открытых глаз. */
+  lid?: { on: number; off: number; confirm?: number };
+  /** v2: средняя ошибка на валидации, в единицах gaze (экран = 2). */
+  accuracy?: number;
 }
 
 export type ProtocolId = 'calm' | 'blinks' | 'zones' | 'closed' | 'lost';

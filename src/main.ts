@@ -1,12 +1,12 @@
 // Точка входа: грейбокс M1 (по умолчанию) или площадка трекинга M0 (?m0). Debug-оверлей — в обоих.
 import { config } from './config';
-import { runCalibration } from './debug/calibrationWizard';
+import { runCalibration, runRecenter } from './debug/calibrationWizard';
 import { unlockAudio } from './debug/beep';
 import { Overlay } from './debug/overlay';
 import { Playground } from './debug/playground';
 import { runProtocol } from './debug/protocolRunner';
 import { downloadText } from './debug/ui';
-import { GameApp } from './game/app';
+import { FieldApp } from './game/field';
 import { evaluate, formatReport } from './input/evaluate';
 import { fixtureFromJson, fixtureToJson } from './input/fixture';
 import { defaultProfile } from './input/gaze';
@@ -100,7 +100,8 @@ async function calibrate(): Promise<string | null> {
     const r = res.profile;
     overlay.setReport(
       `open L ${r.open.L.toFixed(2)} R ${r.open.R.toFixed(2)} · shut L ${r.shut.L.toFixed(2)} R ${r.shut.R.toFixed(2)}\n` +
-        `h ${r.h.left.toFixed(3)} / ${r.h.center.toFixed(3)} / ${r.h.right.toFixed(3)} · closedMs ${r.closedMs}\n` +
+        `веки on ${r.lid?.on.toFixed(2) ?? '—'} off ${r.lid?.off.toFixed(2) ?? '—'} · closedMs ${r.closedMs}\n` +
+        `точность (валидация): ${res.validationError !== null ? `±${(res.validationError * 50).toFixed(0)}% экрана` : '—'}\n` +
         `моргания, мс: ${res.blinkDurationsMs.map((d) => d.toFixed(0)).join(', ') || '—'}`,
     );
     return res.fatal.length ? `Калибровка не принята:\n${res.fatal.join('\n')}` : null;
@@ -108,6 +109,30 @@ async function calibrate(): Promise<string | null> {
     const aborted = (err as Error).name === 'AbortError';
     overlay.setStatus(aborted ? 'Калибровка отменена.' : `Ошибка: ${(err as Error).message}`);
     return aborted ? 'Калибровка отменена.' : (err as Error).message;
+  } finally {
+    busy = null;
+  }
+}
+
+/** Перецентровка за ~2 с: взгляд уплыл (сдвинулся на стуле) — не нужна полная калибровка. */
+async function recenter(): Promise<string | null> {
+  if (busy) return 'Занято.';
+  if (!tracker || source !== tracker || !profile.calibrated) {
+    const msg = 'Перецентровка — после калибровки, с трекером.';
+    overlay.setStatus(msg);
+    return msg;
+  }
+  busy = new AbortController();
+  try {
+    const p = await runRecenter(tracker, profile, busy.signal);
+    if (!p) return 'Взгляд не устоялся — попробуй ещё.';
+    profile = p;
+    tracker.gaze.setProfile(profile);
+    saveProfile(profile);
+    overlay.setStatus('Перецентровка ок.');
+    return null;
+  } catch (err) {
+    return (err as Error).name === 'AbortError' ? 'Отменено.' : (err as Error).message;
   } finally {
     busy = null;
   }
@@ -132,6 +157,10 @@ const overlay = new Overlay({
 
   async calibrate() {
     await calibrate();
+  },
+
+  async recenter() {
+    await recenter();
   },
 
   async record(id, conditions) {
@@ -174,7 +203,7 @@ function makeView(): View {
     return { frame: (s, now, kind) => pg.draw(s, now, kind) };
   }
   overlay.toggle(); // в игре оверлей скрыт до ё
-  return new GameApp(canvas, {
+  return new FieldApp(canvas, {
     async startCamera() {
       const err = await selectSource('tracker');
       if (err) return err;
@@ -183,6 +212,7 @@ function makeView(): View {
     async startKeyboard() {
       await selectSource('fallback');
     },
+    recenter,
   });
 }
 
@@ -201,6 +231,7 @@ function frame(now: number): void {
   fps = fps * 0.95 + (1000 / Math.max(now - lastFrame, 1)) * 0.05;
   lastFrame = now;
   const state = source.poll(now);
+  if (source instanceof TrackerSource) source.setRenderFps(fps, now);
   view.frame(state, now, source.kind);
   const live = source instanceof TrackerSource || source instanceof ReplaySource ? source : null;
   overlay.update({

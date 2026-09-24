@@ -1,6 +1,7 @@
 import { config as defaultConfig, type Config, type LidCombine } from '../config';
 import { OneEuro } from './filters';
 import { LidMachine } from './lid';
+import { dot } from './regression';
 import type { CalibrationProfile, EyeEvent, EyeState, RawFrame } from './types';
 import { ZoneTracker } from './zones';
 
@@ -45,11 +46,34 @@ export function confidenceOf(f: RawFrame, cfg: Config = defaultConfig): number {
   return smoothstep(cfg.signal.lumaLow, cfg.signal.lumaOk, f.luma);
 }
 
-/** Нормированный blink-score по глазам: 0 = открыты, 1 = закрыты (по профилю). */
-export function lidScores(f: RawFrame, p: CalibrationProfile): { L: number; R: number } {
-  const norm = (v: number, open: number, shut: number) =>
-    shut - open > 1e-3 ? clamp01((v - open) / (shut - open)) : 0;
-  return { L: norm(f.blinkL, p.open.L, p.shut.L), R: norm(f.blinkR, p.open.R, p.shut.R) };
+/** Нормированный blink-score по глазам: 0 = открыты, 1 = закрыты (по профилю). open — адаптированный baseline. */
+export function lidScores(
+  f: RawFrame,
+  p: CalibrationProfile,
+  open: { L: number; R: number } = p.open,
+): { L: number; R: number } {
+  const norm = (v: number, o: number, shut: number) => (shut - o > 1e-3 ? clamp01((v - o) / (shut - o)) : 0);
+  return { L: norm(f.blinkL, open.L, p.shut.L), R: norm(f.blinkR, open.R, p.shut.R) };
+}
+
+/** Признаки для регрессии взгляда (калибровка v2): свободный член, голова, глаза (blendshapes), зрачок. */
+export function gazeFeatures(f: RawFrame): number[] {
+  const lookH = (f.lookInL - f.lookOutL + (f.lookOutR - f.lookInR)) / 2;
+  const lookV = (f.lookUpL + f.lookUpR - (f.lookDownL + f.lookDownR)) / 2;
+  return [1, f.headYaw, f.headPitch, lookH, lookV, f.irisX, f.irisY];
+}
+
+/** Взгляд −1..1 по профилю: регрессия v2 или кусочно-линейно по осям v1. До One Euro. */
+export function mapGaze(f: RawFrame, p: CalibrationProfile, cfg: Config = defaultConfig): { x: number; y: number } {
+  if (p.map) {
+    const feats = gazeFeatures(f);
+    return { x: clamp(dot(p.map.x, feats), -1.2, 1.2), y: clamp(dot(p.map.y, feats), -1.2, 1.2) };
+  }
+  const a = rawAxes(f, cfg);
+  return {
+    x: mapAxis(a.h, p.h.left, p.h.center, p.h.right, cfg.gaze.calibTarget),
+    y: mapAxis(a.v, p.v.down, p.v.center, p.v.up, cfg.gaze.calibTarget),
+  };
 }
 
 export function combineLids(s: { L: number; R: number }, mode: LidCombine): number {
@@ -107,6 +131,9 @@ export class GazeProcessor {
   private highSince: number | null = null;
   private winkCand: 'L' | 'R' | null = null;
   private winkSince = 0;
+  /** Адаптивный baseline открытых глаз (свет, усталость). */
+  openBase: { L: number; R: number };
+  private baseT: number | null = null;
   /** Последний нормированный score (для оверлея). */
   lastScore = 0;
 
@@ -115,11 +142,12 @@ export class GazeProcessor {
     private cfg: Config = defaultConfig,
   ) {
     this.lid = new LidMachine({
-      onThreshold: cfg.lid.onThreshold,
-      offThreshold: cfg.lid.offThreshold,
-      confirmFrames: cfg.lid.confirmFrames,
+      onThreshold: profile.lid?.on ?? cfg.lid.onThreshold,
+      offThreshold: profile.lid?.off ?? cfg.lid.offThreshold,
+      confirmFrames: profile.lid?.confirm ?? cfg.lid.confirmFrames,
       closedMs: profile.closedMs,
     });
+    this.openBase = { ...profile.open };
     this.zones = new ZoneTracker({ ...cfg.zones });
     const e = cfg.gaze.oneEuro;
     this.fx = new OneEuro(e.minCutoff, e.beta, e.dCutoff);
@@ -130,12 +158,32 @@ export class GazeProcessor {
   setProfile(p: CalibrationProfile): void {
     this.profile = p;
     this.lid.params.closedMs = p.closedMs;
+    this.lid.params.onThreshold = p.lid?.on ?? this.cfg.lid.onThreshold;
+    this.lid.params.offThreshold = p.lid?.off ?? this.cfg.lid.offThreshold;
+    this.lid.params.confirmFrames = p.lid?.confirm ?? this.cfg.lid.confirmFrames;
+    this.openBase = { ...p.open };
+    this.baseT = null;
     this.fx.reset();
     this.fy.reset();
   }
 
   get current(): EyeState {
     return this.state;
+  }
+
+  /** Медленно подтянуть baseline открытых глаз, только пока веки уверенно открыты. */
+  private adaptBaseline(f: RawFrame, confidentlyOpen: boolean): void {
+    const prevT = this.baseT;
+    this.baseT = f.t;
+    if (!confidentlyOpen || prevT === null) return;
+    const k = 1 - Math.exp(-(f.t - prevT) / this.cfg.lid.baselineTauMs);
+    const p = this.profile;
+    for (const eye of ['L', 'R'] as const) {
+      const raw = eye === 'L' ? f.blinkL : f.blinkR;
+      const lim = this.cfg.lid.baselineMaxDrift * Math.max(p.shut[eye] - p.open[eye], 0);
+      const next = this.openBase[eye] + (raw - this.openBase[eye]) * k;
+      this.openBase[eye] = clamp(next, p.open[eye] - lim, p.open[eye] + lim);
+    }
   }
 
   /** Обработать кадр. Возвращает состояние с событиями только этого кадра. */
@@ -188,19 +236,20 @@ export class GazeProcessor {
     }
 
     // Веки.
-    let s = lidScores(f, this.profile);
+    let s = lidScores(f, this.profile, this.openBase);
     if (cfg.lid.swapLR) s = { L: s.R, R: s.L };
     const score = combineLids(s, cfg.lid.combine);
     this.lastScore = score;
     const phase = this.lid.update(score, f.t, events);
     const open = phase === 'open';
+    this.adaptBaseline(f, open && Math.max(s.L, s.R) < this.lid.params.offThreshold * 0.6);
 
     // Подмигивание: один глаз закрыт, другой открыт, держится winkMinMs.
     let wink: 'L' | 'R' | null = null;
     const hi = Math.max(s.L, s.R);
     const lo = Math.min(s.L, s.R);
     const cand =
-      open && hi >= cfg.lid.onThreshold && lo <= cfg.lid.offThreshold && hi - lo >= cfg.lid.winkAsym
+      open && hi >= this.lid.params.onThreshold && lo <= this.lid.params.offThreshold && hi - lo >= cfg.lid.winkAsym
         ? s.L > s.R
           ? 'L'
           : 'R'
@@ -212,17 +261,14 @@ export class GazeProcessor {
     if (cand && f.t - this.winkSince >= cfg.lid.winkMinMs) wink = cand;
 
     const meanLid = (s.L + s.R) / 2;
-    const squint = open && !wink ? clamp01((meanLid - cfg.lid.squintFrom) / (cfg.lid.onThreshold - cfg.lid.squintFrom)) : 0;
+    const squint = open && !wink ? clamp01((meanLid - cfg.lid.squintFrom) / (this.lid.params.onThreshold - cfg.lid.squintFrom)) : 0;
     const wide = open ? clamp01(((f.wideL + f.wideR) / 2 - cfg.wide.from) / (cfg.wide.to - cfg.wide.from)) : 0;
 
     // Взгляд: заморожен, пока веки сомкнуты, и ещё holdAfterShutMs после открытия.
     let gaze = prev.gaze;
     let zone = prev.zone;
     if (open && f.t - this.lid.lastOpenAt >= cfg.gaze.holdAfterShutMs) {
-      const a = rawAxes(f, cfg);
-      const p = this.profile;
-      const x = mapAxis(a.h, p.h.left, p.h.center, p.h.right, cfg.gaze.calibTarget);
-      const y = mapAxis(a.v, p.v.down, p.v.center, p.v.up, cfg.gaze.calibTarget);
+      const { x, y } = mapGaze(f, this.profile, cfg);
       gaze = { x: this.fx.filter(x, f.t), y: this.fy.filter(y, f.t) };
       zone = this.zones.update(gaze.x, f.t, events);
     }

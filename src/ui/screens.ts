@@ -36,19 +36,21 @@ export class Screens {
     this.root.style.display = 'flex';
   }
 
-  title(onCamera: () => void, onKeyboard: () => void, message = ''): void {
+  title(onCamera: () => void, onKeyboard: () => void, message = '', onHandsFree?: () => void): void {
     const row = el('div', 'display:flex;gap:12px;justify-content:center;margin-top:28px;flex-wrap:wrap');
-    const b1 = button('Играть с камерой', onCamera);
-    const b2 = button('Мышь и клавиатура', onKeyboard);
-    for (const b of [b1, b2]) b.style.cssText += ';padding:10px 18px;font-size:15px';
-    row.append(b1, b2);
+    const bs = [button('Играть с камерой', onCamera), button('Мышь и клавиатура', onKeyboard)];
+    if (onHandsFree) bs.push(button('Hands-free (эксперимент)', onHandsFree));
+    for (const b of bs) b.style.cssText += ';padding:10px 18px;font-size:15px';
+    row.append(...bs);
     this.text('', [
-      el('div', 'font-size:34px;letter-spacing:.35em;color:#eee;margin-bottom:24px', 'LOOK AWAY'),
+      el('div', 'font-size:34px;letter-spacing:.35em;color:#eee;margin-bottom:8px', 'LOOK AWAY'),
+      el('div', 'letter-spacing:.3em;color:#6cf;margin-bottom:24px', 'ПОЛЕВОЙ ЛИДАР'),
       el(
         'div',
         '',
-        'Хоррор, где контроллер — твои глаза.\n' +
-          'Видео с камеры обрабатывается только на этом устройстве и никуда не отправляется.\n\n' +
+        'Миры без света. Ты видишь только то, что отсканировал, — и только пока помнишь.\n' +
+          'Изучай местную жизнь. Тебя ищет чёрная материя.\n\n' +
+          'Камера: моргание стирает скан, взгляд держит угрозу. Видео обрабатывается только на этом устройстве.\n' +
           'Лучше в наушниках и в темноте, но так, чтобы экран освещал лицо.',
       ),
       row,

@@ -9,6 +9,7 @@ export interface OverlayHooks {
   selectSource(kind: 'fallback' | 'tracker'): void;
   loadReplay(file: File): void;
   calibrate(): void;
+  recenter(): void;
   record(protocol: ProtocolId, conditions: { glasses: boolean; light: 'normal' | 'low' }): void;
 }
 
@@ -19,7 +20,7 @@ export interface OverlayInput {
   score: number | null;
   face: FaceFrame | null;
   video: HTMLVideoElement | null;
-  stats: { inferMs: number; hz: number; delegate: string } | null;
+  stats: { inferMs: number; hz: number; delegate: string; targetHz: number } | null;
   profile: CalibrationProfile | null;
   renderFps: number;
 }
@@ -110,7 +111,7 @@ export class Overlay {
       el('div', 'color:#fff', 'LOOK AWAY · M0 debug   (` / ё — скрыть)'),
       el('div', 'color:#777', 'Видео обрабатывается только на этом устройстве и никуда не отправляется.'),
       srcRow,
-      el('div', 'display:flex;gap:6px', button('Калибровка', () => hooks.calibrate())),
+      el('div', 'display:flex;gap:6px', button('Калибровка', () => hooks.calibrate()), button('Перецентровка', () => hooks.recenter())),
       recRow,
       this.statusEl,
       this.infoEl,
@@ -167,14 +168,22 @@ export class Overlay {
     const f = (v: number) => v.toFixed(2).padStart(5);
     const lines = [
       `source ${i.kind}   render ${i.renderFps.toFixed(0)} fps`,
-      i.stats ? `tracker ${i.stats.hz} Hz   infer ${i.stats.inferMs.toFixed(1)} ms   ${i.stats.delegate}` : '',
+      i.stats ? `tracker ${i.stats.hz}/${i.stats.targetHz} Hz   infer ${i.stats.inferMs.toFixed(1)} ms   ${i.stats.delegate}` : '',
       `conf ${f(s.confidence)}   ${s.lost ? 'LOST' : 'ok'}`,
       `zone ${s.zone}   gaze x ${f(s.gaze.x)} y ${f(s.gaze.y)}`,
       `lid ${s.closed ? 'CLOSED' : s.blink ? 'BLINK' : 'open'}   wink ${s.wink ?? '-'}   wide ${f(s.wide)}   squint ${f(s.squint)}`,
       i.raw
         ? `raw blinkL ${f(i.raw.blinkL)} blinkR ${f(i.raw.blinkR)}  squintL ${f(i.raw.squintL)} R ${f(i.raw.squintR)}\n    yaw ${f(i.raw.headYaw)} pitch ${f(i.raw.headPitch)}  iris ${f(i.raw.irisX)} ${f(i.raw.irisY)}  luma ${f(i.raw.luma)}`
         : '',
-      i.profile ? `профиль: ${i.profile.calibrated ? `откалиброван, closedMs ${i.profile.closedMs}` : 'НЕ откалиброван — нажми «Калибровка»'}` : '',
+      i.profile
+        ? `профиль: ${
+            i.profile.calibrated
+              ? `${i.profile.map ? 'v2' : 'v1'}, closedMs ${i.profile.closedMs}` +
+                (i.profile.lid ? `, веки on ${i.profile.lid.on.toFixed(2)} off ${i.profile.lid.off.toFixed(2)}` : '') +
+                (i.profile.accuracy !== undefined ? `, точность ±${(i.profile.accuracy * 50).toFixed(0)}% экрана` : '')
+              : 'НЕ откалиброван — нажми «Калибровка»'
+          }`
+        : '',
     ];
     this.infoEl.textContent = lines.filter(Boolean).join('\n');
 
