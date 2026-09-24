@@ -1,0 +1,30 @@
+name: Smoke (production)
+
+# После каждого production-деплоя Vercel: игра открывается без логина, модель и wasm отдаются правильно.
+on:
+  deployment_status:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    env:
+      URL: https://lookaway-rho.vercel.app
+    steps:
+      - name: Публичный доступ и статика
+        run: |
+          set -eu
+          check() {
+            out=$(curl -s -o /dev/null -w '%{http_code} %{content_type} %{time_total}s' "$URL$1")
+            echo "$1 → $out"
+            case "$out" in 200*) ;; *) echo "::error::$1 → $out"; exit 1 ;; esac
+          }
+          check /
+          check /sw.js
+          check /mediapipe/face_landmarker.task
+          check /mediapipe/wasm/vision_wasm_internal.js
+          check /mediapipe/wasm/vision_wasm_internal.wasm
+          curl -sI "$URL/mediapipe/wasm/vision_wasm_internal.wasm" | grep -iq '^content-type: application/wasm' || { echo "::error::wasm без application/wasm"; exit 1; }
+          curl -s "$URL/" | grep -q 'LOOK AWAY' || { echo "::error::не та страница"; exit 1; }
+          curl -sI "$URL/" | grep -i 'permissions-policy'
