@@ -17,7 +17,28 @@ export class TrackerSource implements EyeSource {
   private runTimes: number[] = [];
   lastRaw: RawFrame | null = null;
   lastFace: FaceFrame | null = null;
-  stats = { inferMs: 0, hz: 0, delegate: '' };
+  stats = { inferMs: 0, hz: 0, delegate: '', targetHz: config.tracker.targetHz };
+  private fpsLowSince: number | null = null;
+  private fpsHighSince: number | null = null;
+
+  /**
+   * Трекер и рендер делят кадр (CLAUDE.md → Грабли): рендер просел — снижаем частоту трекинга,
+   * отпустило — возвращаем. Вызывать каждый кадр рендера.
+   */
+  setRenderFps(fps: number, now: number): void {
+    const a = config.tracker.adaptive;
+    const st = this.stats;
+    this.fpsLowSince = fps < a.lowFps ? (this.fpsLowSince ?? now) : null;
+    this.fpsHighSince = fps > a.highFps ? (this.fpsHighSince ?? now) : null;
+    if (this.fpsLowSince !== null && now - this.fpsLowSince > a.holdMs && st.targetHz > a.minHz) {
+      st.targetHz = Math.max(a.minHz, st.targetHz - a.stepHz);
+      this.fpsLowSince = now;
+    }
+    if (this.fpsHighSince !== null && now - this.fpsHighSince > a.holdMs && st.targetHz < config.tracker.targetHz) {
+      st.targetHz = Math.min(config.tracker.targetHz, st.targetHz + a.stepHz);
+      this.fpsHighSince = now;
+    }
+  }
 
   constructor(profile: CalibrationProfile) {
     this.video = document.createElement('video');
@@ -72,7 +93,7 @@ export class TrackerSource implements EyeSource {
   private tick(): void {
     if (!this.running || !this.tracker) return;
     const now = performance.now();
-    const minGap = 1000 / config.tracker.targetHz - 2;
+    const minGap = 1000 / this.stats.targetHz - 2;
     if (now - this.lastRun >= minGap && this.video.readyState >= 2) {
       this.lastRun = now;
       const { raw, face } = this.tracker.detect(this.video, now);

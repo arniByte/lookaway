@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { computeProfile } from '../src/input/calibration';
 import { runFixture } from '../src/input/evaluate';
 import { GazeProcessor, mapAxis } from '../src/input/gaze';
 import type { EyeEvent, EyeState, Fixture, RawFrame } from '../src/input/types';
-import { synthCalibration, synthFrames, truthProfile, type Script } from './synthetic';
+import { synthFrames, truthProfile, type Script } from './synthetic';
 
 function run(frames: RawFrame[], profile = truthProfile()) {
   const gp = new GazeProcessor(profile);
@@ -121,40 +120,12 @@ describe('GazeProcessor: потеря сигнала', () => {
   });
 });
 
-describe('Калибровка', () => {
-  it('mapAxis: знак берётся из калибровки', () => {
+describe('mapAxis (профиль v1)', () => {
+  it('знак берётся из калибровки', () => {
     expect(mapAxis(0.3, -0.3, 0, 0.3, 2 / 3)).toBeCloseTo(2 / 3);
     expect(mapAxis(0.3, 0.3, 0, -0.3, 2 / 3)).toBeCloseTo(-2 / 3);
     expect(mapAxis(-0.15, -0.3, 0, 0.3, 2 / 3)).toBeCloseTo(-1 / 3);
     expect(mapAxis(5, -0.3, 0, 0.3, 2 / 3)).toBe(1);
-  });
-
-  it('профиль из синтетических сегментов близок к истине', () => {
-    const { profile, warnings } = computeProfile(synthCalibration());
-    expect(warnings).toEqual([]);
-    expect(profile.open.L).toBeCloseTo(0.06, 1);
-    expect(profile.shut.R).toBeCloseTo(0.78, 1);
-    expect(profile.h.right - profile.h.center).toBeGreaterThan(0.3);
-    expect(profile.closedMs).toBeGreaterThanOrEqual(350);
-    expect(profile.closedMs).toBeLessThanOrEqual(900);
-  });
-
-  it.each([false, true])('зоны верны при mirror=%s после калибровки', (mirror) => {
-    const { profile } = computeProfile(synthCalibration({ truth: { mirror } }));
-    const looks = [
-      { t: 1000, zone: 'L' as const },
-      { t: 2500, zone: 'R' as const },
-    ];
-    const r = run(synthFrames({ durationMs: 4000, looks }, { seed: 14, truth: { mirror } }), profile);
-    expect(at(r.states, 1800).zone).toBe('L');
-    expect(at(r.states, 3300).zone).toBe('R');
-    expect(at(r.states, 3300).gaze.x).toBeGreaterThan(0);
-  });
-
-  it('очки/блики: плохое разделение даёт предупреждение', () => {
-    const seg = synthCalibration({ truth: { shut: { L: 0.15, R: 0.8 } } });
-    const { warnings } = computeProfile(seg);
-    expect(warnings.some((w) => w.includes('Глаз L'))).toBe(true);
   });
 });
 
@@ -170,35 +141,4 @@ describe('runFixture', () => {
     };
     expect(runFixture(fx).events.map((e) => e.e)).toEqual(['signalBack', 'blinkStart', 'blinkEnd']);
   });
-});
-
-describe('Калибровка: провал не затирает профиль', () => {
-  it('закрытые ≈ открытые → calibrated=false и fatal', () => {
-    const seg = synthCalibration();
-    seg.closed = seg.center; // «закрыл» глаза, а трекер видит открытые
-    const res = computeProfile(seg);
-    expect(res.profile.calibrated).toBe(false);
-    expect(res.fatal.length).toBeGreaterThan(0);
-  });
-
-  it('взгляд влево/вправо не меняет сигнал → calibrated=false', () => {
-    const seg = synthCalibration();
-    seg.left = seg.center;
-    seg.right = seg.center;
-    expect(computeProfile(seg).profile.calibrated).toBe(false);
-  });
-
-  it('нормальная калибровка → calibrated=true, fatal пуст', () => {
-    const res = computeProfile(synthCalibration());
-    expect(res.profile.calibrated).toBe(true);
-    expect(res.fatal).toEqual([]);
-  });
-});
-
-it('шаг калибровки без лица называется по имени', () => {
-  const seg = synthCalibration();
-  seg.up = seg.up.map((f) => ({ ...f, face: 0 }));
-  const res = computeProfile(seg);
-  expect(res.profile.calibrated).toBe(false);
-  expect(res.fatal.some((w) => w.includes('«up»'))).toBe(true);
 });

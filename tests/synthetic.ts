@@ -1,7 +1,7 @@
 // Синтетические потоки RawFrame с известной разметкой. Страховка логики, не замена живым фикстурам.
 import { config } from '../src/config';
 import { PROTOCOLS } from '../src/input/protocols';
-import type { CalibSegments } from '../src/input/calibration';
+import { calibrationGrid, validationTargets, type CalibData, type GazeTarget } from '../src/input/calibration';
 import type { CalibrationProfile, Cue, Fixture, ProtocolId, RawFrame, Zone } from '../src/input/types';
 
 export function mulberry32(seed: number): () => number {
@@ -22,6 +22,12 @@ export interface Truth {
   eyePerUnit: number; // eyeLook на единицу цели
   mirror: boolean; // перевернуть знак горизонтали (другая конвенция имён/зеркала)
   luma: number;
+  lidNoise?: number; // шум blink-сигнала (по умолчанию — общий noise)
+  lidCommon?: number; // общий для обоих глаз шум век (свет, голова) — именно он даёт ложные моргания
+  eyeNoise?: number; // шум eyeLook* (по умолчанию — общий noise)
+  crossTalk?: number; // вертикаль взгляда протекает в горизонтальный сигнал глаз
+  yawBias?: number; // голова сдвинулась после калибровки
+  openDrift?: (t: number) => number; // дрейф blink-сигнала открытых глаз (свет, усталость)
 }
 
 export const TRUTH: Truth = {
@@ -41,6 +47,8 @@ export interface Script {
   lost?: { t: number; ms: number; how: 'noface' | 'dark' }[];
   /** Произвольный горизонтальный взгляд в единицах цели (перекрывает looks). */
   gazeFn?: (t: number) => number;
+  /** Произвольный 2D-взгляд в единицах цели (перекрывает всё остальное). */
+  gaze2?: (t: number) => { x: number; y: number };
 }
 
 export interface SynthOptions {
@@ -72,6 +80,7 @@ function closureAt(t: number, s: Script['shut']): { both: number; L: number; R: 
 }
 
 function gazeAt(t: number, script: Script): { x: number; y: number } {
+  if (script.gaze2) return script.gaze2(t);
   if (script.gazeFn) return { x: script.gazeFn(t), y: 0 };
   let x = 0;
   let y = 0;
@@ -110,17 +119,20 @@ export function synthFrames(script: Script, opts: SynthOptions = {}): RawFrame[]
     const g = gazeAt(t, script);
     const sign = tr.mirror ? -1 : 1;
     // Горизонталь в анатомической конвенции: взгляд вправо = lookInL + lookOutR.
-    const eyeH = sign * g.x * tr.eyePerUnit;
+    const eyeH = sign * (g.x + (tr.crossTalk ?? 0) * g.y) * tr.eyePerUnit;
     const eyeV = g.y * tr.eyePerUnit;
     const garbage = clo.both > 0.5; // при сомкнутых веках eyeLook* — мусор
-    const look = (v: number) => (garbage ? rnd() * 0.6 : Math.max(0, v + n()));
+    const look = (v: number) => (garbage ? rnd() * 0.6 : Math.max(0, v + n(tr.eyeNoise ?? sigma)));
+    const drift = tr.openDrift?.(t) ?? 0;
+    const lidN = tr.lidNoise ?? sigma;
+    const common = n(tr.lidCommon ?? 0);
 
     const f: RawFrame = {
       t: Math.round(t),
       face: lost?.how === 'noface' ? 0 : 1,
       luma: lost?.how === 'dark' ? 0.02 : tr.luma + n(0.01),
-      blinkL: tr.open.L + clo.L * (tr.shut.L - tr.open.L) + n(),
-      blinkR: tr.open.R + clo.R * (tr.shut.R - tr.open.R) + n(),
+      blinkL: tr.open.L + drift + clo.L * (tr.shut.L - tr.open.L - drift) + common + n(lidN),
+      blinkR: tr.open.R + drift + clo.R * (tr.shut.R - tr.open.R - drift) + common + n(lidN),
       squintL: 0.1 + n(),
       squintR: 0.1 + n(),
       wideL: 0.05 + n(),
@@ -133,7 +145,7 @@ export function synthFrames(script: Script, opts: SynthOptions = {}): RawFrame[]
       lookUpR: look(Math.max(0, eyeV)),
       lookDownL: look(Math.max(0, -eyeV)),
       lookDownR: look(Math.max(0, -eyeV)),
-      headYaw: sign * g.x * tr.headPerUnit + n(0.005),
+      headYaw: sign * g.x * tr.headPerUnit + (tr.yawBias ?? 0) + n(0.005),
       headPitch: g.y * tr.headPerUnit + n(0.005),
       irisX: sign * g.x * 0.15 + n(0.01),
       irisY: g.y * 0.1 + n(0.01),
@@ -165,18 +177,29 @@ export function truthProfile(truth: Partial<Truth> = {}, closedMs = 500): Calibr
   };
 }
 
-/** Сегменты калибровки, как их собрал бы мастер. */
-export function synthCalibration(opts: SynthOptions = {}): CalibSegments {
-  const seg = (script: Script, seed: number) => synthFrames(script, { ...opts, seed });
-  const hold = (zone: Zone, y = 0): Script => ({ durationMs: 1200, looks: [{ t: -1000, zone, y }] });
+/** Взгляд на цель в координатах gaze (−1..1) → единицы синтетики (1 = центр зоны, 2/3 экрана). */
+export const toUnit = (t: GazeTarget) => ({ x: t.x / config.gaze.calibTarget, y: t.y / config.gaze.calibTarget });
+
+/** Держать взгляд на цели ms миллисекунд (с саккадой в начале: первые кадры ещё едут от центра). */
+export function holdGaze(target: GazeTarget, ms: number, opts: SynthOptions = {}): RawFrame[] {
+  const u = toUnit(target);
+  return synthFrames(
+    { durationMs: ms, gaze2: (t) => { const k = Math.min(1, t / 250); return { x: u.x * k, y: u.y * k }; } },
+    opts,
+  );
+}
+
+/** Данные калибровки v2, как их собрал бы мастер: 9 точек, моргания, закрытые глаза, валидация. */
+export function synthCalibration(opts: SynthOptions = {}): CalibData {
+  const seed0 = opts.seed ?? 11;
   return {
-    center: seg(hold('C'), 11),
-    left: seg(hold('L'), 12),
-    right: seg(hold('R'), 13),
-    up: seg(hold('C', 1), 14),
-    down: seg(hold('C', -1), 15),
-    blinks: seg({ durationMs: 4500, shut: [{ t: 800, ms: 150 }, { t: 2200, ms: 180 }, { t: 3600, ms: 160 }] }, 16),
-    closed: seg({ durationMs: 2000, shut: [{ t: -500, ms: 5000 }] }, 17),
+    points: calibrationGrid().map((target, i) => ({ target, frames: holdGaze(target, 1500, { ...opts, seed: seed0 + i }) })),
+    validation: validationTargets().map((target, i) => ({ target, frames: holdGaze(target, 1300, { ...opts, seed: seed0 + 50 + i }) })),
+    blinks: synthFrames(
+      { durationMs: 6500, shut: [800, 2000, 3200, 4400, 5600].map((t, i) => ({ t, ms: 140 + i * 15 })) },
+      { ...opts, seed: seed0 + 30 },
+    ),
+    closed: synthFrames({ durationMs: 2000, shut: [{ t: -500, ms: 5000 }] }, { ...opts, seed: seed0 + 31 }),
   };
 }
 

@@ -13,6 +13,8 @@ export const config = {
     wasmPath: 'mediapipe/wasm',
     lumaEveryNFrames: 5,
     lumaSize: { w: 32, h: 24 },
+    // Трекер и рендер делят кадр: при просадке рендера снижаем частоту трекинга (CLAUDE.md → Грабли).
+    adaptive: { minHz: 15, lowFps: 50, highFps: 57, stepHz: 5, holdMs: 2000 },
   },
 
   signal: {
@@ -37,6 +39,15 @@ export const config = {
     closedMsRange: [350, 900] as const,
     closedMsPerBlink: 2.5, // closedMs = медиана моргания × k, в пределах closedMsRange
     squintFrom: 0.15, // M0: начало полосы прищура по среднему score
+    // Пороги из шума: on ≥ open + k·σ (в нормированных единицах), в пределах диапазонов.
+    noiseSigmaOn: 6,
+    noiseSigmaOff: 3,
+    onRange: [0.4, 0.8] as [number, number],
+    offRange: [0.2, 0.6] as [number, number],
+    // Baseline открытых глаз догоняет свет и усталость; только пока веки уверенно открыты.
+    noisyConfirmSigma: 0.1, // σ нормированного сигнала выше — подтверждать моргание 2 кадрами (+1 кадр латентности)
+    baselineTauMs: 20_000,
+    baselineMaxDrift: 0.5, // доля от (закрыты − открыты при калибровке)
     winkAsym: 0.4,
     winkMinMs: 150,
     swapLR: false, // M0: true, если eyeBlinkLeft оказался правым глазом игрока
@@ -70,9 +81,19 @@ export const config = {
   calibration: {
     settleMs: 600, // не брать кадры в начале шага: глаза ещё едут
     stepMs: 1800,
-    blinkCount: 3,
-    blinkStepMs: 4500,
+    blinkCount: 5,
+    blinkStepMs: 6500,
     closedStepMs: 2500,
+    // v2: 9 точек сеткой 3×3 на ±gridAt, приём по стабильности взгляда.
+    gridAt: 0.75,
+    validateAt: 0.4, // точки валидации (±, ±)
+    stableWindow: 8, // кадров в окне стабильности
+    stableStd: 0.05, // M0: макс. СКО сырых осей в окне (саккада ≫ шум)
+    minStableFrames: 14,
+    pointTimeoutMs: 3500,
+    ridgeLambda: 0.02,
+    maxValidationError: 0.25, // хуже — предложить повтор
+    checkMs: 3500, // живая проверка курсором после калибровки
     minFramesPerStep: 5,
     minSeparation: 0.2, // закрытые − открытые, иначе профиль не принимается (очки, блики)
     minGazeSpan: 0.03, // M0: минимальный сырой размах L/R от центра, иначе профиль не принимается
