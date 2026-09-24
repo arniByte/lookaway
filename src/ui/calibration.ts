@@ -1,12 +1,14 @@
 // Калибровка на каждом входе (TECH → Калибровка). В центре — лидар-портрет глаз игрока:
 // предпроверка (лицо, свет, расстояние, центр) → 9 точек → моргания → закрытые глаза →
 // валидация → живая проверка → результат с повтором. Точка засчитывается, когда взгляд устоялся.
-import { beep, doubleBeep } from '../audio/beep';
+import { cue } from '../audio/beep';
+import { audioRunning } from '../audio/engine';
 import { config } from '../config';
 import {
   calibrationGrid,
   computeProfile,
   isStable,
+  median,
   recenterProfile,
   validationTargets,
   type CalibData,
@@ -31,13 +33,14 @@ class CalibUI {
   private top = h('div.cap.top', this.kicker, this.step, this.extra);
   private bottom = h('div.cap.bottom', this.hint);
   readonly target = h('div.target');
+  private flashEl = h('div.flash');
   readonly ring = h('div.target-ring');
   private raf = 0;
 
   constructor(private tracker: TrackerSource) {
     this.eyes.el.classList.add('eyes');
     this.target.style.opacity = this.ring.style.opacity = '0';
-    this.root.append(this.eyes.el, this.top, this.bottom, this.ring, this.target);
+    this.root.append(this.eyes.el, this.flashEl, this.top, this.bottom, this.ring, this.target);
     document.body.append(this.root);
     this.fit();
     addEventListener('resize', this.fit);
@@ -57,6 +60,13 @@ class CalibUI {
     this.step.textContent = step;
     this.hint.textContent = hint;
     this.extra.replaceChildren();
+  }
+
+  /** Визуальный дубль звукового сигнала: вспышка кадра. Звук мог не включиться (или выключен). */
+  flash(): void {
+    this.flashEl.classList.remove('go');
+    void this.flashEl.offsetWidth;
+    this.flashEl.classList.add('go');
   }
 
   setExtra(...nodes: HTMLElement[]): void {
@@ -158,12 +168,30 @@ async function collectPoints(tracker: TrackerSource, ui: CalibUI, targets: GazeT
         frames = await collectPoint(tracker, ui, targets[i], signal);
       }
       out.push({ target: targets[i], frames: frames ?? [] });
-      beep(1200, 30);
+      cue.point();
     }
   } finally {
     ui.collecting(false);
   }
   return out;
+}
+
+/** Ждём сомкнутых век по сырому сигналу (профиль ещё не готов): выше открытых на closeDelta, 3 кадра подряд. */
+async function waitClosed(tracker: TrackerSource, open: number, maxMs: number, signal: AbortSignal): Promise<boolean> {
+  let run = 0;
+  const off = tracker.onRaw((f) => {
+    run = f.face && (f.blinkL + f.blinkR) / 2 > open + config.calibration.closeDelta ? run + 1 : 0;
+  });
+  try {
+    const t0 = performance.now();
+    while (run < 3) {
+      if (performance.now() - t0 > maxMs) return false;
+      await sleep(40, signal);
+    }
+    return true;
+  } finally {
+    off();
+  }
 }
 
 /** Живая проверка: точка идёт за взглядом по новому профилю. */
@@ -195,28 +223,38 @@ async function runOnce(ui: CalibUI, tracker: TrackerSource, signal: AbortSignal)
     await precheck(ui, tracker, signal);
     data.points = await collectPoints(tracker, ui, calibrationGrid(), 'Калибровка · 2 из 4 · взгляд', signal);
 
-    ui.stage('Калибровка · 3 из 4 · веки', 'Моргни на каждый сигнал', 'Обычно, как всегда моргаешь.');
+    const soundHint = () => (audioRunning() ? '' : 'Звук не включился — ориентируйся на вспышку.');
+    ui.stage('Калибровка · 3 из 4 · веки', 'Моргни на каждый сигнал', soundHint() || 'Сигнал — звук и вспышка. Моргай обычно.');
     ui.setExtra(dots(c.blinkCount, 0));
-    await sleep(1200, signal);
+    await sleep(1400, signal);
     bucket = data.blinks;
     const gap = c.blinkStepMs / (c.blinkCount + 1);
     for (let k = 0; k < c.blinkCount; k++) {
       await sleep(gap, signal);
-      beep();
+      cue.blink();
+      ui.flash();
       ui.setExtra(dots(c.blinkCount, k + 1));
     }
     await sleep(gap, signal);
     bucket = null;
 
-    ui.stage('Калибровка · 3 из 4 · веки', 'На сигнал закрой глаза', 'Открой на двойной сигнал. Так в игре выпускается импульс.');
+    // Закрытые глаза: ждём, пока веки реально сомкнутся (не по таймеру), потом копим кадры.
+    ui.stage('Калибровка · 3 из 4 · веки', 'Закрой глаза на сигнал', soundHint() || 'Держи закрытыми, пока не услышишь два сигнала. Так в игре выпускается импульс.');
+    ui.setExtra();
     await sleep(1800, signal);
-    beep();
-    await sleep(c.settleMs + 300, signal);
+    cue.close();
+    ui.flash();
+    ui.stage('Калибровка · 3 из 4 · веки', 'Глаза закрыты', 'Открой на два сигнала.');
+    const open = median(data.points.flatMap((p) => p.frames).filter((f) => f.face).map((f) => (f.blinkL + f.blinkR) / 2));
+    await waitClosed(tracker, Number.isFinite(open) ? open : 0.2, c.closeWaitMs, signal);
+    await sleep(c.settleMs, signal);
     bucket = data.closed;
     await sleep(c.closedStepMs, signal);
     bucket = null;
-    doubleBeep();
-    await sleep(500, signal);
+    cue.open();
+    ui.flash();
+    ui.stage('Калибровка · 3 из 4 · веки', 'Открой глаза', '');
+    await sleep(700, signal);
 
     data.validation = await collectPoints(tracker, ui, validationTargets(), 'Калибровка · 4 из 4 · проверка точности', signal);
     const res = computeProfile(data);

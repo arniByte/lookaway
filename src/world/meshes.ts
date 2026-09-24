@@ -16,6 +16,7 @@ export const MAT = {
   fungus: 6,
   insect: 7,
   beacon: 8,
+  figure: 9,
 } as const;
 
 type V3 = THREE.Vector3;
@@ -376,6 +377,115 @@ export function buildBeacon(): THREE.BufferGeometry {
     b.tube(ring, ring.map(() => 0.03), 5, MAT.beacon, () => 1);
   }
   b.ellipsoid(v(0, 0.25, 0), v(0.7, 0.25, 0.7), 16, 4, MAT.beacon, () => 0.8);
+  return b.build();
+}
+
+// ─── Люди ────────────────────────────────────────────────────────────────────
+
+/** Поза фигуры. Углы в радианах; руки: [плечо — 0 вдоль тела, π/2 вперёд; локоть — сгиб вперёд]. */
+export interface FigurePose {
+  lean: number; // корпус вперёд
+  side: number; // корпус вбок (выглядывает из-за ствола), + — вправо
+  headTilt: number; // голова к плечу
+  headDrop: number; // голова вниз (− — вверх, смотрит на тебя снизу)
+  armL: [number, number];
+  armR: [number, number];
+  stride: number; // −1..1 шаг
+  crouch: number; // 0..1
+}
+
+export type PoseName = 'stand' | 'tilt' | 'reach' | 'peek' | 'crouch' | 'walk' | 'slump' | 'kneel';
+
+export const POSES: Record<PoseName, FigurePose> = {
+  stand: { lean: 0.03, side: 0, headTilt: 0, headDrop: 0.05, armL: [0.08, 0.1], armR: [0.08, 0.1], stride: 0, crouch: 0 },
+  tilt: { lean: 0.05, side: 0, headTilt: 0.55, headDrop: 0.12, armL: [0.12, 0.25], armR: [0.1, 0.2], stride: 0, crouch: 0 },
+  reach: { lean: 0.16, side: 0, headTilt: 0.15, headDrop: -0.08, armL: [0.25, 0.35], armR: [1.35, 0.08], stride: 0.35, crouch: 0.05 },
+  peek: { lean: 0.08, side: 0.38, headTilt: 0.35, headDrop: 0, armL: [0.45, 1.3], armR: [0.1, 0.15], stride: 0, crouch: 0.08 },
+  crouch: { lean: 0.5, side: 0, headTilt: 0.1, headDrop: -0.35, armL: [0.7, 0.9], armR: [0.65, 1.0], stride: 0, crouch: 0.75 },
+  walk: { lean: 0.1, side: 0, headTilt: 0.05, headDrop: 0.02, armL: [0.35, 0.25], armR: [-0.3, 0.1], stride: 0.85, crouch: 0.05 },
+  slump: { lean: 0.35, side: 0.05, headTilt: 0.2, headDrop: 0.75, armL: [0.02, 0.05], armR: [0.02, 0.05], stride: 0, crouch: 0.1 },
+  kneel: { lean: 0.12, side: 0, headTilt: 0, headDrop: 0.6, armL: [0.3, 0.8], armR: [0.3, 0.8], stride: 0, crouch: 1 },
+};
+
+export interface FigureBuild {
+  height: number; // м
+  armMul: number; // длина рук относительно нормы
+  backpack: boolean;
+  fingers: boolean; // длинные пальцы — примета того, кто двигается
+}
+
+/** Человек из трубок и эллипсоидов, лицом к +Z, ноги в нуле. В скане — силуэт в плаще. */
+export function buildFigure(pose: FigurePose, b0: FigureBuild): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  const H = b0.height;
+  const refl = () => 0.5;
+  const skin = () => 0.62;
+  const cs = Math.cos(pose.side);
+  const ss = Math.sin(pose.side);
+  const cl = Math.cos(pose.lean);
+  const sl = Math.sin(pose.lean);
+  const up = v(ss, cs * cl, cs * sl).normalize(); // ось корпуса
+  const fwd = v(0, -sl, cl).normalize();
+  const right = up.clone().cross(fwd).normalize().negate(); // правая сторона фигуры (−X при взгляде на +Z)
+  const hipY = H * (0.52 - 0.3 * pose.crouch);
+  const pelvis = v(0, hipY, 0);
+
+  // Ноги: бедро вперёд при приседе и шаге, голень назад.
+  for (const side of [-1, 1] as const) {
+    const hip = pelvis.clone().add(v(side * H * 0.055, 0, 0));
+    const step = side * pose.stride * 0.35;
+    const thighA = pose.crouch * 1.25 + step;
+    const shinA = -pose.crouch * 1.35 + Math.max(0, -step) * 0.6;
+    const thighDir = v(0, -Math.cos(thighA), Math.sin(thighA));
+    const knee = hip.clone().add(thighDir.multiplyScalar(H * 0.25));
+    const shinDir = v(0, -Math.cos(thighA + shinA), Math.sin(thighA + shinA));
+    const ankle = knee.clone().add(shinDir.multiplyScalar(H * 0.25));
+    b.tube([hip, knee], [H * 0.045, H * 0.036], 6, MAT.figure, refl);
+    b.tube([knee, ankle], [H * 0.036, H * 0.026], 6, MAT.figure, refl);
+    b.ellipsoid(ankle.clone().add(v(0, -H * 0.012, H * 0.035)), v(H * 0.028, H * 0.02, H * 0.06), 8, 4, MAT.figure, refl);
+  }
+
+  // Корпус и плащ до колен.
+  const neck = pelvis.clone().add(up.clone().multiplyScalar(H * 0.3));
+  const spine = [0, 0.35, 0.7, 1].map((t) => pelvis.clone().add(up.clone().multiplyScalar(H * 0.3 * t)));
+  b.tube(spine, [H * 0.075, H * 0.07, H * 0.085, H * 0.06], 10, MAT.figure, refl);
+  const hem = pelvis.clone().add(v(0, -H * 0.24 * (1 - pose.crouch * 0.5), H * 0.02 * pose.stride));
+  b.tube([pelvis.clone().add(up.clone().multiplyScalar(H * 0.05)), hem], [H * 0.085, H * 0.12], 12, MAT.figure, () => 0.46);
+  const shoulderC = neck.clone().add(up.clone().multiplyScalar(-H * 0.03));
+  const shL = shoulderC.clone().add(right.clone().multiplyScalar(-H * 0.12));
+  const shR = shoulderC.clone().add(right.clone().multiplyScalar(H * 0.12));
+  b.tube([shL, shoulderC, shR], [H * 0.04, H * 0.05, H * 0.04], 6, MAT.figure, refl);
+  if (b0.backpack) {
+    b.ellipsoid(pelvis.clone().add(up.clone().multiplyScalar(H * 0.19)).add(fwd.clone().multiplyScalar(-H * 0.1)), v(H * 0.09, H * 0.12, H * 0.06), 10, 6, MAT.figure, () => 0.42);
+  }
+
+  // Голова: наклон к плечу и вниз.
+  const headUp = up.clone().applyAxisAngle(fwd, -pose.headTilt).applyAxisAngle(right, pose.headDrop).normalize();
+  b.tube([neck, neck.clone().add(headUp.clone().multiplyScalar(H * 0.05))], [H * 0.026, H * 0.024], 6, MAT.figure, skin);
+  const head = neck.clone().add(headUp.clone().multiplyScalar(H * 0.115));
+  b.ellipsoid(head, v(H * 0.058, H * 0.07, H * 0.064), 12, 8, MAT.figure, skin);
+
+  // Руки.
+  const arm = (sh: V3, sideSign: number, [pitch, elbow]: [number, number]) => {
+    const down = up.clone().negate();
+    const d1 = down.clone().multiplyScalar(Math.cos(pitch)).add(fwd.clone().multiplyScalar(Math.sin(pitch))).add(right.clone().multiplyScalar(sideSign * 0.08)).normalize();
+    const L1 = H * 0.18 * b0.armMul;
+    const L2 = H * 0.16 * b0.armMul;
+    const el = sh.clone().add(d1.clone().multiplyScalar(L1));
+    const d2 = d1.clone().multiplyScalar(Math.cos(elbow)).add(fwd.clone().multiplyScalar(Math.sin(elbow))).normalize();
+    const wr = el.clone().add(d2.clone().multiplyScalar(L2));
+    b.tube([sh, el], [H * 0.032, H * 0.026], 6, MAT.figure, refl);
+    b.tube([el, wr], [H * 0.026, H * 0.02], 6, MAT.figure, refl);
+    b.ellipsoid(wr.clone().add(d2.clone().multiplyScalar(H * 0.03)), v(H * 0.022, H * 0.03, H * 0.022), 6, 4, MAT.figure, skin);
+    if (b0.fingers) {
+      for (let k = -1.5; k <= 1.5; k++) {
+        const base = wr.clone().add(d2.clone().multiplyScalar(H * 0.05)).add(right.clone().multiplyScalar(k * H * 0.009));
+        b.tube([base, base.clone().add(d2.clone().multiplyScalar(H * 0.075))], [H * 0.006, H * 0.004], 3, MAT.figure, skin);
+      }
+    }
+  };
+  arm(shL, -1, pose.armL);
+  arm(shR, 1, pose.armR);
   return b.build();
 }
 

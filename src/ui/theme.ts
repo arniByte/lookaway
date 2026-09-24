@@ -5,4 +5,3 @@ export const MONO = '"SF Mono", "JetBrains Mono", "Cascadia Mono", ui-monospace,
 
 export const INK = (a = 1) => `rgba(236,234,228,${a})`;
 export const ACCENT = (a = 1) => `rgba(242,179,91,${a})`;
-export const DANGER = (a = 1) => `rgba(229,72,77,${a})`;

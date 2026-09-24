@@ -21,10 +21,6 @@ const POINT_VERT = /* glsl */ `
   uniform float uFoot;       // угловой шаг лучей × заполнение, рад
   uniform float uProj;       // пикс. на единицу tan угла (высота буфера / 2tg(fov/2))
   uniform float uMaxSize;
-  uniform vec3 uDark;        // позиция чёрной материи на момент импульса
-  uniform float uDarkOn;
-  uniform float uLensAngle;
-  uniform float uLensStrength;
   uniform float uUnknown[16];
   uniform int uPalette;      // 0 — интенсивность, 1 — высота, 2 — классы
   uniform float uGround;     // высота земли под точкой импульса
@@ -51,7 +47,8 @@ const POINT_VERT = /* glsl */ `
     if (mat < 5.5) return vec3(0.90, 0.56, 0.74);   // лепестки
     if (mat < 6.5) return vec3(0.88, 0.78, 0.56);   // грибы
     if (mat < 7.5) return vec3(0.42, 0.78, 0.96);   // насекомые
-    return vec3(1.0);                               // маяк
+    if (mat < 8.5) return vec3(1.0);                // маяк
+    return vec3(0.86, 0.86, 0.9);                   // люди: без класса
   }
 
   void hide() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; }
@@ -64,15 +61,6 @@ const POINT_VERT = /* glsl */ `
     float dissolve = fract(seed * 7.31 + 0.13);
     if (dist < 0.05 || dist > uRange || dist > front || seed < uErosion || dissolve > uAlive) { hide(); return; }
     vec3 world = uOrigin + d * dist;
-
-    // Гравитационное линзирование: точки рядом с чёрной материей тянет к ней.
-    if (uDarkOn > 0.5) {
-      vec3 toDark = uDark - uOrigin;
-      float dd = length(toDark);
-      float ang = acos(clamp(dot(d, toDark / dd), -1.0, 1.0));
-      float k = 1.0 - smoothstep(0.0, uLensAngle, ang);
-      if (k > 0.0 && dist > dd * 0.6) world += normalize(uDark - world) * uLensStrength * k * k;
-    }
 
     vec4 mv = modelViewMatrix * vec4(world, 1.0);
     float z = max(-mv.z, 0.05);
@@ -96,7 +84,7 @@ const POINT_VERT = /* glsl */ `
     } else {
       col = mix(vec3(0.085, 0.09, 0.1), vec3(0.95, 0.97, 1.0), shadeI);
       if (mat < 1.5) col *= 0.82;
-      if (mat > 7.5) col = vec3(1.0, 0.98, 0.94) * 1.15;          // маяк — ретрорефлектор
+      if (mat > 7.5 && mat < 8.5) col = vec3(1.0, 0.98, 0.94) * 1.15; // маяк — ретрорефлектор
     }
 
     // Неописанная жизнь — «unclassified»: янтарная подпись поверх любой палитры.
@@ -222,8 +210,8 @@ export class Lidar {
     });
   }
 
-  /** Импульс из origin в момент time на дальность range. dark — позиция чёрной материи (линзирование) или null. */
-  pulse(origin: THREE.Vector3, time: number, range: number, ground: number, dark: THREE.Vector3 | null): ScanRecord {
+  /** Импульс из origin в момент time на дальность range; ground — высота земли под сканером (палитра «высота»). */
+  pulse(origin: THREE.Vector3, time: number, range: number, ground: number): ScanRecord {
     const lc = config.lidar;
     while (this.scans.length >= lc.maxScans) this.drop(this.scans[0]);
     const rt = this.pool.pop() ?? this.makeTarget();
@@ -259,10 +247,6 @@ export class Lidar {
         uFoot: { value: this.foot * lc.pointFill },
         uProj: { value: 1 },
         uMaxSize: { value: lc.maxPointPx },
-        uDark: { value: dark ? dark.clone() : new THREE.Vector3() },
-        uDarkOn: { value: dark ? 1 : 0 },
-        uLensAngle: { value: lc.lensAngle },
-        uLensStrength: { value: lc.lensStrength },
         uUnknown: { value: this.unknown },
         uPalette: { value: this.palette },
         uGround: { value: ground },

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { config } from '../src/config';
-import { createDark, hearPulse, stepDark, type DarkCtx } from '../src/game/darkMatter';
 import { createFauna, hostIndex, stepFauna } from '../src/game/fauna';
 import { advanceStudy, cladogram, createResearch, leaves, measurements, startStudy } from '../src/game/research';
 import { chargeScanner, createScanner, pulseRange, releasePulse, scanPower } from '../src/game/scanner';
@@ -46,78 +45,6 @@ describe('сканер', () => {
     chargeScanner(s, 500, true);
     expect(releasePulse(s)).toBeNull();
     expect(s.hold).toBe(0);
-  });
-});
-
-describe('чёрная материя', () => {
-  const ctx = (over: Partial<DarkCtx> = {}): DarkCtx => ({ player: { x: 0, z: 0 }, eyesClosed: false, blinkStart: false, gazeOn: false, ...over });
-  const run = (d: ReturnType<typeof createDark>, ms: number, c: DarkCtx) => {
-    let r: 'kill' | null = null;
-    for (let t = 0; t < ms && !r; t += DT) r = stepDark(d, DT, c, world);
-    return r;
-  };
-
-  it('спит до импульса, не слышит дальше hearing', () => {
-    const d = createDark(world);
-    const x0 = d.x;
-    run(d, 5000, ctx());
-    expect(d.x).toBe(x0);
-    expect(hearPulse(d, d.x + config.dark.hearing + 5, d.z)).toBe(false);
-    expect(d.awake).toBe(false);
-    expect(hearPulse(d, d.x + 10, d.z)).toBe(true);
-    expect(d.awake).toBe(true);
-  });
-
-  it('идёт на место импульса со своей скоростью', () => {
-    const d = createDark(world);
-    const px = d.x + 20;
-    hearPulse(d, px, d.z);
-    run(d, 4000, ctx({ player: { x: d.x + 200, z: d.z } }));
-    expect(px - d.x).toBeCloseTo(20 - config.dark.speed * 4, 0);
-  });
-
-  it('закрытые глаза — быстрее', () => {
-    const a = createDark(world);
-    const b = createDark(world);
-    for (const d of [a, b]) hearPulse(d, d.x + 30, d.z);
-    run(a, 3000, ctx({ player: { x: 999, z: 999 } }));
-    run(b, 3000, ctx({ player: { x: 999, z: 999 }, eyesClosed: true }));
-    expect(b.x - createDark(world).x).toBeGreaterThan((a.x - createDark(world).x) * 1.8);
-  });
-
-  it('моргание — рывок, но никогда ближе safeDist и никогда не убивает', () => {
-    const d = createDark(world);
-    d.awake = true;
-    d.x = 6;
-    d.z = 0;
-    for (let i = 0; i < 50; i++) {
-      const r = stepDark(d, 1, ctx({ blinkStart: true, gazeOn: true }), world);
-      expect(r).toBeNull();
-    }
-    expect(Math.hypot(d.x, d.z)).toBeGreaterThanOrEqual(config.dark.safeDist - 1e-6);
-  });
-
-  it('взгляд держит не дольше holdMaxMs, потом она идёт; отвёл взгляд — снова держит', () => {
-    const d = createDark(world);
-    d.awake = true;
-    d.x = 7; // в радиусе прямой погони
-    d.z = 0;
-    run(d, config.dark.holdMaxMs - 200, ctx({ gazeOn: true }));
-    expect(d.x).toBeCloseTo(7, 6);
-    run(d, 1000, ctx({ gazeOn: true }));
-    expect(d.x).toBeLessThan(7 - 0.5);
-    run(d, config.dark.holdResetMs + 100, ctx({ player: { x: -500, z: 0 } }));
-    const x = d.x;
-    run(d, 1000, ctx({ gazeOn: true, player: { x: -500, z: 0 } }));
-    expect(d.x).toBeCloseTo(x, 6);
-  });
-
-  it('касание — смерть', () => {
-    const d = createDark(world);
-    d.awake = true;
-    d.x = 3;
-    d.z = 0;
-    expect(run(d, 5000, ctx())).toBe('kill');
   });
 });
 

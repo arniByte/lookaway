@@ -61,6 +61,35 @@ export class StudyPanel {
   }
 }
 
+/** Запись пропавшей экспедиции: рукописный курсив, счёт участников, подсказка. */
+export class NotePanel {
+  private root = h('div.study.note.panel.ui');
+  private timer = 0;
+  open = false;
+
+  constructor() {
+    document.body.append(this.root);
+  }
+
+  show(text: string, index: number, total: number, hint: string | null): void {
+    this.root.replaceChildren(
+      h('div.kicker', `Полевой журнал · участник ${index} из ${total}`),
+      h('p.hand', text),
+      ...(hint ? [h('div.foot.accent', `Метка «образец» на компасе: ${hint}`)] : []),
+      h('div.foot', 'E — закрыть'),
+    );
+    this.root.classList.add('on');
+    this.open = true;
+    clearTimeout(this.timer);
+    this.timer = window.setTimeout(() => this.hide(), 12_000);
+  }
+
+  hide(): void {
+    this.root.classList.remove('on');
+    this.open = false;
+  }
+}
+
 export class Journal {
   private root = h('div.journal.panel.ui');
   private canvas = h('canvas');
@@ -70,10 +99,10 @@ export class Journal {
     document.body.append(this.root);
   }
 
-  toggle(r: Research, species: Species[], seed: number): void {
+  toggle(r: Research, species: Species[], seed: number, notes: string[] = []): void {
     this.open = !this.open;
     this.root.classList.toggle('on', this.open);
-    if (this.open) this.render(r, species, seed);
+    if (this.open) this.render(r, species, seed, notes);
   }
 
   close(): void {
@@ -81,7 +110,7 @@ export class Journal {
     this.root.classList.remove('on');
   }
 
-  private render(r: Research, species: Species[], seed: number): void {
+  private render(r: Research, species: Species[], seed: number, notes: string[]): void {
     const docs = species.filter((s) => r.documented.has(s.id));
     const cards = h('div.cards');
     const known = (s: Species) => (r.documented.has(s.id) ? 0 : 1);
@@ -105,6 +134,8 @@ export class Journal {
       docs.length >= 2 ? h('div.kicker', 'Кладограмма · UPGMA по геному') : h('div.small.muted', 'Кладограмма появится со вторым описанным видом.'),
       ...(docs.length >= 2 ? [this.canvas] : []),
       cards,
+      ...(r.notesRead.size ? [h('hr.rule'), h('div.kicker', `Записи экспедиции · ${r.notesRead.size}`)] : []),
+      ...[...r.notesRead].sort((a, b) => a - b).map((id) => h('p.hand', notes[id] ?? '')),
     );
     this.canvas.style.height = `${Math.max(110, docs.length * 38)}px`;
     if (docs.length >= 2) requestAnimationFrame(() => this.drawTree(cladogram(docs)!, species));

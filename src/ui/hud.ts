@@ -1,7 +1,7 @@
 // HUD сканера (GDD → HUD): без прицела. Компас с маяком, счётчик видов, заряд, рамки цели в мире,
 // удержание угрозы, накопление импульса в темноте, уведомления. Canvas 2D поверх облака.
 import { wrapAngle } from '../game/nav';
-import { ACCENT, DANGER, INK, MONO, SANS, SERIF } from './theme';
+import { ACCENT, INK, MONO, SANS, SERIF } from './theme';
 
 export interface HudTarget {
   x: number; // CSS-пикс., центр цели на экране
@@ -30,8 +30,8 @@ export interface HudState {
   hint: string; // как выпустить импульс (первые разы)
   blackout: number; // 0..1: глаза закрыты — экран тёмный
   target: HudTarget | null;
-  hold: { x: number; y: number; left: number } | null; // чёрная материя удерживается взглядом
-  danger: number; // 0..1
+  markers: { bearing: number; dist: number; label: string }[]; // подсказки записей экспедиции
+  danger: number; // 0..1 — он совсем рядом: поле зрения сужается
 }
 
 interface Toast {
@@ -80,10 +80,12 @@ export class Hud {
     c.clearRect(0, 0, W, H);
     c.textBaseline = 'alphabetic';
 
+    // Он совсем рядом: поле зрения сужается (туннель, без подсказки — откуда).
     if (s.danger > 0.01) {
-      const g = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
-      g.addColorStop(0, DANGER(0));
-      g.addColorStop(1, DANGER(0.22 * Math.min(1, s.danger)));
+      const k = Math.min(1, s.danger);
+      const g = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * (0.5 - 0.25 * k), W / 2, H / 2, Math.max(W, H) * 0.7);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, `rgba(0,0,0,${(0.85 * k).toFixed(3)})`);
       c.fillStyle = g;
       c.fillRect(0, 0, W, H);
     }
@@ -103,7 +105,6 @@ export class Hud {
     this.counters(s, W);
     this.charge(s, W, H);
     if (s.target && s.blackout < 0.5) this.bracket(s.target, W, now);
-    if (s.hold && s.blackout < 0.5) this.holdMark(s.hold);
     c.globalAlpha = 1;
     if (s.blackout > 0.3 && s.charging) this.accumulating(s, W, H);
     this.drawToasts(W, now);
@@ -121,8 +122,8 @@ export class Hud {
     return w;
   }
 
-  private kicker(t: string, x: number, y: number, color = INK(0.45), align: CanvasTextAlign = 'left'): number {
-    return this.text(t.toUpperCase(), x, y, `500 10.5px ${SANS}`, color, align, '2px');
+  private kicker(t: string, x: number, y: number, color = INK(0.7), align: CanvasTextAlign = 'left'): number {
+    return this.text(t.toUpperCase(), x, y, `650 12px ${SANS}`, color, align, '1.8px');
   }
 
   /** Лента компаса сверху: риски, стороны света, маяк. */
@@ -140,13 +141,13 @@ export class Hud {
       const x = xOf(rel);
       const a = fade(x);
       const major = deg % 15 === 0;
-      c.strokeStyle = INK((major ? 0.55 : 0.25) * a);
+      c.strokeStyle = INK((major ? 0.75 : 0.35) * a);
       c.beginPath();
       c.moveTo(x, y);
       c.lineTo(x, y - (major ? 7 : 4));
       c.stroke();
-      if (deg % 90 === 0) this.text(CARDINAL[deg / 90], x, y - 13, `500 11px ${SANS}`, INK(0.85 * a), 'center');
-      else if (deg % 30 === 0) this.text(String(deg), x, y - 13, `400 9.5px ${MONO}`, INK(0.4 * a), 'center');
+      if (deg % 90 === 0) this.text(CARDINAL[deg / 90], x, y - 13, `700 13px ${SANS}`, INK(0.95 * a), 'center');
+      else if (deg % 30 === 0) this.text(String(deg), x, y - 13, `500 11px ${MONO}`, INK(0.6 * a), 'center');
     }
     c.fillStyle = INK(0.9);
     c.beginPath();
@@ -155,7 +156,7 @@ export class Hud {
     c.lineTo(cx + 4, y + 9);
     c.fill();
     const hd = Math.round((((s.heading * 180) / Math.PI) % 360 + 360) % 360);
-    this.text(String(hd).padStart(3, '0') + '°', cx, y + 24, `400 10.5px ${MONO}`, INK(0.55), 'center');
+    this.text(String(hd).padStart(3, '0') + '°', cx, y + 26, `600 12.5px ${MONO}`, INK(0.8), 'center');
 
     // Маяк: ромб на ленте или стрелка у края.
     const rel = wrapAngle(s.beacon.bearing - s.heading);
@@ -176,44 +177,57 @@ export class Hud {
       c.lineTo(bx - d * 2, y);
     }
     c.fill();
+    // Метки подсказок: маленькие янтарные риски под лентой.
+    for (const m of s.markers) {
+      const mr = wrapAngle(m.bearing - s.heading);
+      if (Math.abs(mr) > TAPE_SPAN / 2) continue;
+      const mx = xOf(mr);
+      c.strokeStyle = ACCENT(0.95);
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(mx, y + 4);
+      c.lineTo(mx, y + 12);
+      c.stroke();
+      this.text(`${m.label} ${Math.round(m.dist)} м`, mx, y + 40, `600 11.5px ${SANS}`, ACCENT(0.9), 'center');
+    }
     const label = `маяк ${Math.round(s.beacon.dist)} м`;
-    if (inside) this.text(label, bx, y - 27, `400 10px ${SANS}`, ACCENT(0.75), 'center');
-    else this.text(label, bx + Math.sign(rel) * 10, y - 1, `400 10px ${SANS}`, ACCENT(0.75), rel > 0 ? 'left' : 'right');
+    if (inside) this.text(label, bx, y - 28, `600 12px ${SANS}`, ACCENT(0.95), 'center');
+    else this.text(label, bx + Math.sign(rel) * 10, y - 1, `600 12px ${SANS}`, ACCENT(0.95), rel > 0 ? 'left' : 'right');
   }
 
   private counters(s: HudState, W: number): void {
     const c = this.ctx;
     const x = 30;
     this.kicker('Описано', x, 32);
-    const w = this.text(String(s.documented), x, 60, `300 26px ${SANS}`, INK(0.95));
-    this.text(` / ${s.goal}`, x + w, 60, `300 16px ${SANS}`, INK(0.45));
+    const w = this.text(String(s.documented), x, 64, `500 32px ${SANS}`, INK(1));
+    this.text(` / ${s.goal}`, x + w, 64, `500 19px ${SANS}`, INK(0.6));
     for (let i = 0; i < s.goal; i++) {
       c.beginPath();
-      c.arc(x + 3 + i * 11, 74, 2.6, 0, Math.PI * 2);
+      c.arc(x + 4 + i * 13, 80, 3.2, 0, Math.PI * 2);
       if (i < s.documented) {
         c.fillStyle = INK(0.9);
         c.fill();
       } else {
-        c.strokeStyle = INK(0.35);
-        c.lineWidth = 1;
+        c.strokeStyle = INK(0.5);
+        c.lineWidth = 1.2;
         c.stroke();
       }
     }
-    this.text(`видов в долине ${s.total} · Tab — журнал`, x, 96, `400 11.5px ${SANS}`, INK(0.38));
-    this.kicker(`905 нм · ${s.palette}`, W - 30, 32, INK(0.38), 'right');
-    this.text('V — палитра', W - 30, 50, `400 11px ${SANS}`, INK(0.28), 'right');
+    this.text(`видов в долине ${s.total} · Tab — журнал`, x, 106, `500 13.5px ${SANS}`, INK(0.62));
+    this.kicker(`905 нм · ${s.palette}`, W - 30, 32, INK(0.62), 'right');
+    this.text('V — палитра', W - 30, 52, `500 13px ${SANS}`, INK(0.48), 'right');
   }
 
   /** Заряд: тонкая линия внизу. Копится мощность — янтарём поверх. */
   private charge(s: HudState, W: number, H: number): void {
     const c = this.ctx;
-    const w = 180;
+    const w = 220;
     const x = W / 2 - w / 2;
-    const y = H - 40;
+    const y = H - 46;
     const ready = s.charge >= 1;
-    this.kicker('Импульс', x, y - 10);
-    this.text(ready ? (s.charging ? `${Math.round(s.range)} м` : 'готов') : `${Math.round(s.charge * 100)}%`, x + w, y - 10, `500 11px ${SANS}`, ready ? INK(0.9) : INK(0.5), 'right');
-    c.fillStyle = INK(0.16);
+    this.kicker('Импульс', x, y - 11);
+    this.text(ready ? (s.charging ? `${Math.round(s.range)} м` : 'готов') : `${Math.round(s.charge * 100)}%`, x + w, y - 11, `700 13.5px ${SANS}`, ready ? INK(1) : INK(0.7), 'right');
+    c.fillStyle = INK(0.22);
     c.fillRect(x, y, w, 1);
     c.fillStyle = INK(ready ? 0.95 : 0.6);
     c.fillRect(x, y - 0.5, w * Math.min(1, s.charge), 2);
@@ -221,7 +235,7 @@ export class Hud {
       c.fillStyle = ACCENT(0.95);
       c.fillRect(x, y - 1, w * s.power, 3);
     }
-    if (s.hint && ready) this.text(s.hint, W / 2, y + 20, `400 12px ${SANS}`, INK(0.45), 'center');
+    if (s.hint && ready) this.text(s.hint, W / 2, y + 24, `500 14.5px ${SANS}`, INK(0.75), 'center');
   }
 
   /** Рамка цели в мире: уголки + подпись справа. */
@@ -252,44 +266,28 @@ export class Hud {
     const lx = right ? t.x + hh + 16 : t.x - hh - 16;
     const align: CanvasTextAlign = right ? 'left' : 'right';
     let y = t.y - hh + 12;
-    if (t.latin) this.text(t.title, lx, y + 4, `italic 400 18px ${SERIF}`, col(a), align);
+    if (t.latin) this.text(t.title, lx, y + 5, `italic 500 21px ${SERIF}`, col(a), align);
     else this.kicker(t.title, lx, y, col(a), align);
-    y += 20;
+    y += 23;
     if (t.sub) {
-      this.text(t.sub, lx, y, `400 12.5px ${SANS}`, INK(0.5), align);
-      y += 22;
+      this.text(t.sub, lx, y, `500 14.5px ${SANS}`, INK(0.72), align);
+      y += 26;
     }
     if (t.action) {
-      c.font = `500 13px ${SANS}`;
+      c.font = `650 15px ${SANS}`;
       const tw = c.measureText(t.action.text).width;
-      let x = right ? lx : lx - tw - (t.action.key ? 30 : 0);
+      let x = right ? lx : lx - tw - (t.action.key ? 34 : 0);
       if (t.action.key) {
-        c.strokeStyle = INK(0.5);
-        c.lineWidth = 1;
+        c.strokeStyle = INK(0.7);
+        c.lineWidth = 1.2;
         c.beginPath();
-        c.roundRect(x, y - 14, 21, 19, 4);
+        c.roundRect(x, y - 16, 24, 22, 5);
         c.stroke();
-        this.text(t.action.key, x + 10.5, y, `500 11px ${MONO}`, INK(0.95), 'center');
-        x += 30;
+        this.text(t.action.key, x + 12, y, `700 12.5px ${MONO}`, INK(1), 'center');
+        x += 34;
       }
-      this.text(t.action.text, x, y, `500 13px ${SANS}`, INK(0.9), 'left');
+      this.text(t.action.text, x, y, `650 15px ${SANS}`, INK(1), 'left');
     }
-  }
-
-  private holdMark(hd: { x: number; y: number; left: number }): void {
-    const c = this.ctx;
-    const r = 34;
-    c.strokeStyle = DANGER(0.25);
-    c.lineWidth = 1;
-    c.beginPath();
-    c.arc(hd.x, hd.y, r, 0, Math.PI * 2);
-    c.stroke();
-    c.strokeStyle = DANGER(0.95);
-    c.lineWidth = 2;
-    c.beginPath();
-    c.arc(hd.x, hd.y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, hd.left));
-    c.stroke();
-    this.kicker('Удержание', hd.x, hd.y + r + 18, DANGER(0.9), 'center');
   }
 
   /** В темноте: кольцо дальности растёт, пока глаза закрыты (видно без камеры и зрителям). */
@@ -308,7 +306,7 @@ export class Hud {
     c.arc(cx, cy, r, 0, Math.PI * 2);
     c.stroke();
     this.kicker(s.charge >= 1 ? 'Накопление' : 'Заряд', cx, cy - 6, INK(0.5), 'center');
-    this.text(s.charge >= 1 ? `${Math.round(s.range)} м` : `${Math.round(s.charge * 100)}%`, cx, cy + 16, `300 18px ${SANS}`, INK(0.85), 'center');
+    this.text(s.charge >= 1 ? `${Math.round(s.range)} м` : `${Math.round(s.charge * 100)}%`, cx, cy + 20, `500 24px ${SANS}`, INK(0.95), 'center');
   }
 
   private drawToasts(W: number, now: number): void {
@@ -318,10 +316,10 @@ export class Hud {
       const a = Math.min(1, (now - t.at) / 300, (t.until - now) / 600);
       this.ctx.globalAlpha = a;
       this.kicker(t.kicker, W / 2, y, ACCENT(0.95), 'center');
-      if (t.latin) this.text(t.title, W / 2, y + 26, `italic 400 22px ${SERIF}`, INK(0.95), 'center');
-      else this.text(t.title, W / 2, y + 24, `300 18px ${SANS}`, INK(0.95), 'center');
-      if (t.sub) this.text(t.sub, W / 2, y + 46, `400 12.5px ${SANS}`, INK(0.55), 'center');
-      y += 76;
+      if (t.latin) this.text(t.title, W / 2, y + 29, `italic 500 26px ${SERIF}`, INK(1), 'center');
+      else this.text(t.title, W / 2, y + 28, `500 22px ${SANS}`, INK(1), 'center');
+      if (t.sub) this.text(t.sub, W / 2, y + 52, `500 14.5px ${SANS}`, INK(0.75), 'center');
+      y += 84;
     }
     this.ctx.globalAlpha = 1;
   }
