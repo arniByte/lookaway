@@ -1,7 +1,7 @@
 // Точка входа: игра (по умолчанию) или площадка трекинга M0 (?m0). Debug-оверлей — в обоих.
 import './ui/theme.css';
 import { config } from './config';
-import { unlockAudio } from './audio/beep';
+import { installAudioUnlock, unlockAudio } from './audio/engine';
 import { Overlay } from './debug/overlay';
 import { Playground } from './debug/playground';
 import { runProtocol } from './debug/protocolRunner';
@@ -40,6 +40,7 @@ function saveProfile(p: CalibrationProfile): void {
 }
 
 const canvas = document.getElementById('view') as HTMLCanvasElement;
+installAudioUnlock(); // звук будится первым же кликом/клавишей — до запуска камеры
 const m0 = new URLSearchParams(location.search).has('m0');
 let profile = loadProfile();
 let source: EyeSource = new FallbackSource();

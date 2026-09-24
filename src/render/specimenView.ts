@@ -116,7 +116,6 @@ export class SpecimenView {
   }
 
   open(s: Species, seed: number): void {
-    this.close();
     let geo: THREE.BufferGeometry;
     if (s.kingdom === 'plant') {
       geo = buildPlant(s, seed, 2);
@@ -125,6 +124,16 @@ export class SpecimenView {
       const wings = parts.wings.map((w) => w.geo.clone().rotateZ(w.side * 0.35)); // крылья приподняты
       geo = mergeGeometries([parts.body, ...wings]);
     }
+    this.load(geo, seed, s.kingdom === 'animal' ? 0.5 : 0.15, s.genome.lumPeak);
+  }
+
+  /** Произвольная геометрия (фон титула: силуэт). */
+  openGeometry(geo: THREE.BufferGeometry, seed: number, tilt = 0.05): void {
+    this.load(geo, seed, tilt, 0);
+  }
+
+  private load(geo: THREE.BufferGeometry, seed: number, tilt: number, lumPeak: number): void {
+    this.close();
     geo.computeBoundingSphere();
     const bs = geo.boundingSphere!;
     geo.translate(-bs.center.x, -bs.center.y, -bs.center.z);
@@ -138,14 +147,14 @@ export class SpecimenView {
     this.points = new THREE.Points(pg, this.mat);
     this.points.frustumCulled = false;
     this.holder.add(this.points);
-    this.holder.rotation.set(s.kingdom === 'animal' ? 0.5 : 0.15, 0, 0);
+    this.holder.rotation.set(tilt, 0, 0);
     const dist = bs.radius / Math.sin(((this.camera.fov / 2) * Math.PI) / 180) * 1.15;
     this.camera.position.set(0, 0, dist);
     this.camera.near = dist / 100;
     this.camera.far = dist * 4;
     this.camera.lookAt(0, 0, 0);
-    this.mat.uniforms.uHasLum.value = s.genome.lumPeak ? 1 : 0;
-    (this.mat.uniforms.uLum.value as THREE.Color).copy(wavelengthColor(s.genome.lumPeak || 500));
+    this.mat.uniforms.uHasLum.value = lumPeak ? 1 : 0;
+    (this.mat.uniforms.uLum.value as THREE.Color).copy(wavelengthColor(lumPeak || 500));
     this.mat.uniforms.uProgress.value = 0;
     geo.dispose();
     this.active = true;

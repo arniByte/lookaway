@@ -21,6 +21,7 @@ export interface Research {
   firstSeenAt: Map<number, number>; // вид → игровое время документирования
   study: Study | null;
   observations: Map<number, Set<string>>; // вид → наблюдения (поведение в поле)
+  notesRead: Set<number>; // статуи, чьи записи прочитаны
 }
 
 export const createResearch = (): Research => ({
@@ -28,6 +29,7 @@ export const createResearch = (): Research => ({
   firstSeenAt: new Map(),
   study: null,
   observations: new Map(),
+  notesRead: new Set(),
 });
 
 export function startStudy(r: Research, species: number, source: Study['source']): void {

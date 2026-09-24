@@ -276,13 +276,13 @@ export class LidarEyes {
       g.lineTo(x + sx * L, y);
       g.stroke();
     }
-    g.font = `400 10px ${MONO}`;
+    g.font = `500 12px ${MONO}`;
     g.fillStyle = INK(0.35);
     g.textAlign = 'left';
     g.fillText(`${GW}×${GH} · зеркально`, m + 4, this.h - m - 6);
 
     if (!p || !this.crop) {
-      g.font = `500 11px ${SANS}`;
+      g.font = `700 13px ${SANS}`;
       g.letterSpacing = '2px';
       g.fillStyle = INK(0.5);
       g.textAlign = 'center';
@@ -350,21 +350,21 @@ export class LidarEyes {
   /** Подпись глаза на тёмной подложке: читается поверх светлой кожи. */
   private tag(title: string, value: string, x: number, y: number, right: boolean, alert: boolean): void {
     const g = this.octx;
-    g.font = `400 10.5px ${MONO}`;
-    const w = Math.max(g.measureText(value).width, 24) + 16;
+    g.font = `500 12.5px ${MONO}`;
+    const w = Math.max(g.measureText(value).width, 28) + 18;
     const x0 = right ? x : x - w;
-    g.fillStyle = 'rgba(5,5,5,0.72)';
+    g.fillStyle = 'rgba(5,5,5,0.78)';
     g.beginPath();
-    g.roundRect(x0, y - 2, w, 34, 5);
+    g.roundRect(x0, y - 6, w, 42, 6);
     g.fill();
     g.textAlign = 'left';
-    g.font = `500 10.5px ${SANS}`;
+    g.font = `700 12.5px ${SANS}`;
     g.letterSpacing = '2px';
-    g.fillStyle = INK(0.85);
-    g.fillText(title, x0 + 8, y + 12);
+    g.fillStyle = INK(0.95);
+    g.fillText(title, x0 + 9, y + 10);
     g.letterSpacing = '0px';
-    g.font = `400 10.5px ${MONO}`;
-    g.fillStyle = alert ? ACCENT(0.95) : INK(0.55);
-    g.fillText(value, x0 + 8, y + 26);
+    g.font = `500 12.5px ${MONO}`;
+    g.fillStyle = alert ? ACCENT(1) : INK(0.75);
+    g.fillText(value, x0 + 9, y + 27);
   }
 }

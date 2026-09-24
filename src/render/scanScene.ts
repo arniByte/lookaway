@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { config } from '../config';
-import { buildAnimal, buildBeacon, buildGrass, buildLog, buildPebble, buildPlant, buildRock, buildShrub, buildStump, MAT, tagSpecies, type AnimalParts } from '../world/meshes';
+import { buildAnimal, buildBeacon, buildFigure, buildGrass, buildLog, buildPebble, buildPlant, buildRock, buildShrub, buildStump, MAT, POSES, tagSpecies, type AnimalParts, type PoseName } from '../world/meshes';
 import { makeRng } from '../world/random';
 import type { World } from '../world/worldgen';
 
@@ -69,9 +69,6 @@ export function scanMaterial(origin: { value: THREE.Vector3 }, vel = new THREE.V
   });
 }
 
-/** Чёрная материя: поглощает лучи — возврата нет (дистанция 0), но заслоняет то, что за ней. */
-const VOID_FRAG = /* glsl */ `void main() { gl_FragColor = vec4(0.0); }`;
-
 export interface AnimalRig {
   id: number;
   species: number;
@@ -80,12 +77,20 @@ export interface AnimalRig {
   vel: THREE.Vector3;
 }
 
+/** Силуэт: одна фигура на каждую позу, видима одна. Скорость — для доплера. */
+export interface StalkerRig {
+  root: THREE.Group;
+  poses: Map<PoseName, THREE.Mesh>;
+  vel: THREE.Vector3;
+  setPose(p: PoseName): void;
+}
+
 export class ScanScene {
   readonly scene = new THREE.Scene();
   readonly origin = { value: new THREE.Vector3() };
   readonly staticMat: THREE.ShaderMaterial;
   readonly animals = new Map<number, AnimalRig>();
-  readonly dark: THREE.Mesh;
+  readonly stalker: StalkerRig;
 
   constructor(world: World, onProgress?: (k: number) => void) {
     this.staticMat = scanMaterial(this.origin);
@@ -96,17 +101,28 @@ export class ScanScene {
     this.scene.add(beacon);
     this.buildAnimals(world);
 
-    const darkGeo = new THREE.IcosahedronGeometry(1, 3);
-    const p = darkGeo.getAttribute('position');
-    const rnd = makeRng(world.seed ^ 0xdead);
-    for (let i = 0; i < p.count; i++) {
-      const k = 1 + (rnd() - 0.5) * 0.25;
-      p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 1.25, p.getZ(i) * k);
+    // Силуэт: выше экспедиции, руки длиннее, длинные пальцы, без рюкзака — приметы для внимательных.
+    const vel = new THREE.Vector3();
+    const mat = scanMaterial(this.origin, vel);
+    const root = new THREE.Group();
+    const poses = new Map<PoseName, THREE.Mesh>();
+    const sc = config.stalker;
+    for (const name of Object.keys(POSES) as PoseName[]) {
+      const m = new THREE.Mesh(tagSpecies(buildFigure(POSES[name], { height: 1.78 * sc.heightMul, armMul: sc.armMul, backpack: false, fingers: true }), null), mat);
+      m.visible = name === 'stand';
+      root.add(m);
+      poses.set(name, m);
     }
-    this.dark = new THREE.Mesh(darkGeo, new THREE.ShaderMaterial({ vertexShader: 'void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}', fragmentShader: VOID_FRAG, side: THREE.DoubleSide }));
-    this.dark.scale.setScalar(config.dark.radius);
-    this.dark.position.set(world.darkSpawn.x, world.darkSpawn.y + config.dark.radius, world.darkSpawn.z);
-    this.scene.add(this.dark);
+    root.position.set(world.stalkerSpawn.x, world.stalkerSpawn.y, world.stalkerSpawn.z);
+    this.scene.add(root);
+    this.stalker = {
+      root,
+      poses,
+      vel,
+      setPose: (p) => {
+        for (const [n, m] of poses) m.visible = n === p;
+      },
+    };
   }
 
   /** Освободить GPU-буферы: мир пересоздаётся на каждый забег. */
@@ -191,6 +207,9 @@ export class ScanScene {
       put(l.x, l.z, tagSpecies(buildLog(l.seed, l.len, l.r), null).applyMatrix4(m));
     }
     for (const st of world.stumps) put(st.x, st.z, place(tagSpecies(buildStump(st.seed, st.scale), null), st.x, st.y, st.z, st.rot, 1));
+    for (const f of world.statues) {
+      put(f.x, f.z, place(tagSpecies(buildFigure(POSES[f.pose], { height: f.height, armMul: 1, backpack: true, fingers: false }), null), f.x, f.y, f.z, f.yaw, 1));
+    }
     const shrubVariants = Array.from({ length: 5 }, (_, i) => tagSpecies(buildShrub(makeRng(world.seed * 7 + i), 1), null));
     world.shrubs.forEach((c, i) => put(c.x, c.z, place(shrubVariants[i % shrubVariants.length], c.x, c.y, c.z, c.rot, c.scale)));
     const pebbleVariants = Array.from({ length: 6 }, (_, i) => tagSpecies(buildPebble(makeRng(world.seed * 11 + i), 1), null));

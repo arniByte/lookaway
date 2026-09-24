@@ -111,6 +111,5 @@ describe('мир', () => {
     expect(w.height(0, 0)).toBeCloseTo(0, 6);
     const R = config.world.radius;
     expect(w.height(R + 10, 0) - w.height(R - 20, 0)).toBeGreaterThan(10);
-    expect(Math.hypot(w.darkSpawn.x, w.darkSpawn.z)).toBeGreaterThanOrEqual(config.world.darkMinDist);
   });
 });

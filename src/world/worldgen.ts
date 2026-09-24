@@ -2,6 +2,7 @@
 import { config as defaultConfig, type Config } from '../config';
 import { fbm, simplex2 } from './noise';
 import { chance, fork, gauss, int, pick, range, type Rng } from './random';
+import type { PoseName } from './meshes';
 import { generateSpecies, type Species } from './species';
 
 export interface Vec3 {
@@ -44,6 +45,15 @@ export interface Scatter extends Vec3 {
   seed: number;
 }
 
+/** Застывший участник прошлой экспедиции (GDD → Угроза). Смотрит на маяк. */
+export interface Statue extends Vec3 {
+  id: number;
+  yaw: number; // поворот вокруг Y: локальный +Z фигуры → направление взгляда
+  pose: PoseName;
+  height: number;
+  seed: number;
+}
+
 export interface AnimalSpawn extends Vec3 {
   id: number;
   species: number;
@@ -68,10 +78,11 @@ export interface World {
   stumps: Scatter[]; // scale — радиус, м
   shrubs: Scatter[];
   pebbles: Scatter[];
+  statues: Statue[];
   animals: AnimalSpawn[];
   beacon: Vec3;
   spawn: { x: number; z: number; yaw: number };
-  darkSpawn: Vec3;
+  stalkerSpawn: Vec3;
   colliders: Collider[];
 }
 
@@ -288,6 +299,23 @@ export function generateWorld(seed: number, cfg: Config = defaultConfig): World 
     pebbles.push({ x, z, y: height(x, z), rot: sr0() * Math.PI * 2, scale: range(sr0, 0.04, 0.16), seed: int(sr0, 0, 1e9) });
   }
 
+  // Экспедиция: застывшие люди на опушках, лицом к маяку. Коллайдер — как у ствола.
+  const er = fork(seed, 'expedition');
+  const ec = cfg.expedition;
+  const statues: Statue[] = [];
+  const poses: PoseName[] = ['stand', 'slump', 'kneel', 'tilt', 'stand', 'crouch'];
+  for (let tries = 0; statues.length < ec.statues && tries < 4000; tries++) {
+    const a = er() * Math.PI * 2;
+    const d = range(er, ec.minDist, Math.min(ec.maxDist, R - 6));
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    const c = clearing(x, z);
+    if (c < 0.15 || c > 0.75 || tooClose(x, z, 0.8) || statues.some((st) => Math.hypot(st.x - x, st.z - z) < 14)) continue;
+    const i = statues.length;
+    statues.push({ id: i, x, z, y: height(x, z), yaw: Math.atan2(-x, -z) + gauss(er) * 0.15, pose: poses[i % poses.length], height: range(er, 1.62, 1.84), seed: int(er, 0, 1e9) });
+    colliders.push({ x, z, r: 0.3 });
+  }
+
   // Фауна: бабочки — у куртин кормового растения, жуки — у стволов и грибов, стрекозовидные — над полянами.
   const ar = fork(seed, 'animals');
   const animals: AnimalSpawn[] = [];
@@ -322,9 +350,9 @@ export function generateWorld(seed: number, cfg: Config = defaultConfig): World 
 
   const sr = fork(seed, 'spawn');
   const da = sr() * Math.PI * 2;
-  const dd = range(sr, wc.darkMinDist, R - 10);
-  const darkSpawn = { x: Math.cos(da) * dd, y: 0, z: Math.sin(da) * dd };
-  darkSpawn.y = height(darkSpawn.x, darkSpawn.z);
+  const dd = range(sr, cfg.stalker.spawnMinDist, R - 10);
+  const stalkerSpawn = { x: Math.cos(da) * dd, y: 0, z: Math.sin(da) * dd };
+  stalkerSpawn.y = height(stalkerSpawn.x, stalkerSpawn.z);
 
   return {
     seed,
@@ -339,10 +367,11 @@ export function generateWorld(seed: number, cfg: Config = defaultConfig): World 
     stumps,
     shrubs,
     pebbles,
+    statues,
     animals,
     beacon,
     spawn: { x: 0, z: 3, yaw: Math.PI }, // спиной к маяку: впереди долина, маяк — засечка на кольце HUD
-    darkSpawn,
+    stalkerSpawn,
     colliders,
   };
 }
