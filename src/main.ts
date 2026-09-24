@@ -14,6 +14,7 @@ import { PROTOCOLS } from './input/protocols';
 import { FallbackSource } from './input/sources/fallbackSource';
 import { ReplaySource } from './input/sources/replaySource';
 import { TrackerSource } from './input/sources/trackerSource';
+import { prefetchTrackerAssets } from './input/tracker';
 import type { CalibrationProfile, EyeSource, EyeState, SourceKind } from './input/types';
 
 function loadProfile(): CalibrationProfile {
@@ -186,6 +187,12 @@ function makeView(): View {
 }
 
 const view = makeView();
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('[sw]', err));
+}
+const idle = (fn: () => void) => ('requestIdleCallback' in window ? requestIdleCallback(fn) : setTimeout(fn, 500));
+idle(() => prefetchTrackerAssets());
 let lastFrame = performance.now();
 let fps = 60;
 void source.start().then(() => requestAnimationFrame(frame));

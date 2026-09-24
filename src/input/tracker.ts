@@ -48,6 +48,17 @@ const emptyRaw = (t: number, luma: number): RawFrame => ({
   headYaw: 0, headPitch: 0, irisX: 0, irisY: 0,
 });
 
+/**
+ * Прогреть кэш модели и wasm, пока игрок читает титул: клик «Играть с камерой» не ждёт ~15 МБ.
+ * Только скачивание в HTTP-кэш / service worker, без инициализации GPU.
+ */
+export function prefetchTrackerAssets(cfg: Config = defaultConfig): void {
+  const base = import.meta.env.BASE_URL;
+  for (const path of [cfg.tracker.modelPath, `${cfg.tracker.wasmPath}/vision_wasm_internal.js`, `${cfg.tracker.wasmPath}/vision_wasm_internal.wasm`]) {
+    fetch(base + path).catch(() => {});
+  }
+}
+
 export interface TrackerOutput {
   raw: RawFrame;
   face: FaceFrame | null;

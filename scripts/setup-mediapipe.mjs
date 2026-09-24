@@ -1,6 +1,6 @@
 // Кладёт wasm и модель MediaPipe в public/mediapipe/ (не в git). Идемпотентно.
 // Модель качается один раз и проверяется по sha256.
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,9 @@ const MODEL_SHA256 = '64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
 mkdirSync(outDir, { recursive: true });
-cpSync(wasmSrc, wasmDst, { recursive: true });
+// vision_wasm_module_internal.* нужен только при forVisionTasks(path, useModule=true) — не используем, −12 МБ деплоя.
+cpSync(wasmSrc, wasmDst, { recursive: true, filter: (src) => !src.includes('module_internal') });
+for (const f of ['vision_wasm_module_internal.js', 'vision_wasm_module_internal.wasm']) rmSync(join(wasmDst, f), { force: true });
 
 if (existsSync(modelPath) && sha256(readFileSync(modelPath)) === MODEL_SHA256) {
   process.exit(0);
