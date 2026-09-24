@@ -11,6 +11,7 @@ export class FieldSfx {
   private dark: { panner: PannerNode; gain: GainNode; osc: OscillatorNode; osc2: OscillatorNode; noise: AudioBufferSourceNode } | null = null;
   private buzz = new Map<number, { panner: PannerNode; gain: GainNode; osc: OscillatorNode }>();
   private hum: { gain: GainNode; osc: OscillatorNode } | null = null;
+  private tone: { gain: GainNode; osc: OscillatorNode; osc2: OscillatorNode } | null = null;
   private nextBeat = 0;
   private nextChirp = 0;
 
@@ -65,18 +66,18 @@ export class FieldSfx {
     l.upZ.setTargetAtTime(u.z, t, 0.02);
   }
 
-  /** Импульс: чирп вниз + шорох отражений, растянутый на время прихода волны. */
-  pulse(): void {
+  /** Импульс: чирп вниз + шорох отражений, растянутый на время прихода волны. power 0..1 — глубже и длиннее. */
+  pulse(power = 0.5): void {
     const ctx = this.ctx;
     if (!ctx || !this.master || !this.noise) return;
     const t = ctx.currentTime + 0.01;
     const o = ctx.createOscillator();
     o.type = 'sine';
-    o.frequency.setValueAtTime(2400, t);
-    o.frequency.exponentialRampToValueAtTime(380, t + 0.18);
+    o.frequency.setValueAtTime(2400 - power * 600, t);
+    o.frequency.exponentialRampToValueAtTime(380 - power * 180, t + 0.18 + power * 0.12);
     const g = ctx.createGain();
     o.connect(g).connect(this.master);
-    this.env(g, t, 0.18, 0.005, 0.2);
+    this.env(g, t, 0.14 + power * 0.08, 0.005, 0.2 + power * 0.15);
     o.start(t);
     o.stop(t + 0.25);
     const src = ctx.createBufferSource();
@@ -93,6 +94,55 @@ export class FieldSfx {
     ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.95);
     src.start(t, Math.random());
     src.stop(t + 1);
+  }
+
+  /** Накопление импульса с закрытыми глазами: тон поднимается с мощностью — слышно в темноте. */
+  charge(on: boolean, power: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    if (on && !this.tone) {
+      const osc = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      osc.type = 'sine';
+      osc2.type = 'sine';
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      osc.connect(gain);
+      osc2.connect(gain);
+      gain.connect(this.master);
+      osc.start();
+      osc2.start();
+      this.tone = { gain, osc, osc2 };
+    }
+    if (!this.tone) return;
+    const t = ctx.currentTime;
+    const f = 140 + power * 260;
+    this.tone.osc.frequency.setTargetAtTime(f, t, 0.05);
+    this.tone.osc2.frequency.setTargetAtTime(f * 1.5 + 1.5, t, 0.05); // квинта с биением
+    this.tone.gain.gain.setTargetAtTime(on ? 0.02 + power * 0.03 : 0, t, on ? 0.08 : 0.03);
+    if (!on) {
+      this.tone.osc.stop(t + 0.3);
+      this.tone.osc2.stop(t + 0.3);
+      this.tone = null;
+    }
+  }
+
+  /** Открыл глаза без заряда: короткий глухой щелчок. */
+  denied(): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    const t = ctx.currentTime + 0.01;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = 110;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 600;
+    const g = ctx.createGain();
+    o.connect(lp).connect(g).connect(this.master);
+    this.env(g, t, 0.05, 0.004, 0.06);
+    o.start(t);
+    o.stop(t + 0.1);
   }
 
   footstep(run: boolean): void {
@@ -321,5 +371,6 @@ export class FieldSfx {
     }
     this.insects([]);
     this.study(false, 0);
+    this.charge(false, 0);
   }
 }

@@ -4,7 +4,7 @@ import { Recorder } from '../input/recorder';
 import type { TrackerSource } from '../input/sources/trackerSource';
 import type { Fixture, FixtureMeta, Zone } from '../input/types';
 import { config } from '../config';
-import { beep, doubleBeep } from './beep';
+import { beep, doubleBeep } from '../audio/beep';
 import { fullscreenLayer, gazeToScreen, placeDot, sleep } from './ui';
 
 const READING =

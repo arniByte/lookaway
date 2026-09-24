@@ -278,13 +278,80 @@ export function buildFungus(g: Genome, r: Rng, detail = 1): THREE.BufferGeometry
 
 export function buildGrass(r: Rng): THREE.BufferGeometry {
   const b = new GeoBuilder();
-  const blades = 7;
+  const blades = 9 + Math.round(r() * 4);
   for (let k = 0; k < blades; k++) {
-    const root = v(gauss(r) * 0.08, 0, gauss(r) * 0.08);
-    const d = v(gauss(r) * 0.25, 1, gauss(r) * 0.25).normalize();
-    const L = range(r, 0.2, 0.55);
-    b.blade(root, d, perp(d), L, 0.02, v(gauss(r) * 0.12, -L * 0.15, gauss(r) * 0.12), 3, MAT.foliage, range(r, 0.3, 0.45), 0.9);
+    const root = v(gauss(r) * 0.1, 0, gauss(r) * 0.1);
+    const d = v(gauss(r) * 0.3, 1, gauss(r) * 0.3).normalize();
+    const L = range(r, 0.18, 0.6);
+    b.blade(root, d, perp(d), L, range(r, 0.012, 0.024), v(gauss(r) * 0.14, -L * 0.2, gauss(r) * 0.14), 3, MAT.foliage, range(r, 0.28, 0.46), 0.9);
   }
+  return b.build();
+}
+
+/** Упавший ствол вдоль X: трубка с изломом, обломки сучьев, торец темнее. */
+export function buildLog(seed: number, length: number, radius: number): THREE.BufferGeometry {
+  const r = makeRng(seed);
+  const b = new GeoBuilder();
+  const pts: V3[] = [];
+  const rs: number[] = [];
+  const bend = gauss(r) * 0.15;
+  for (let i = 0; i <= 6; i++) {
+    const t = i / 6;
+    pts.push(v((t - 0.5) * length, radius * 0.8 + Math.sin(t * Math.PI) * bend * 0.3, Math.sin(t * Math.PI) * bend * length * 0.1));
+    rs.push(radius * (1 - t * 0.35) * (0.92 + 0.08 * Math.sin(i * 2.7)));
+  }
+  const refl = range(r, 0.22, 0.34);
+  b.tube(pts, rs, 9, MAT.bark, (t, a) => refl * (0.75 + 0.25 * Math.sin(a * 5 + t * 30)));
+  const stubs = 2 + Math.round(r() * 3);
+  for (let k = 0; k < stubs; k++) {
+    const t = range(r, 0.2, 0.85);
+    const at = v((t - 0.5) * length, radius * 0.8, 0);
+    const d = v(gauss(r) * 0.3, range(r, 0.3, 1), gauss(r)).normalize();
+    b.tube([at, at.clone().add(d.clone().multiplyScalar(range(r, 0.3, 0.9)))], [radius * 0.3, radius * 0.12], 4, MAT.bark, () => refl);
+  }
+  return b.build();
+}
+
+/** Пень с корневыми наплывами. */
+export function buildStump(seed: number, radius: number): THREE.BufferGeometry {
+  const r = makeRng(seed);
+  const b = new GeoBuilder();
+  const H = radius * range(r, 1.5, 3);
+  b.tube([v(0, -0.1, 0), v(0, H * 0.5, 0), v(0, H, 0)], [radius * 1.25, radius, radius * 0.95], 10, MAT.bark, (_t, a) => 0.3 * (0.8 + 0.2 * Math.sin(a * 7)));
+  b.ellipsoid(v(0, H, 0), v(radius * 0.95, radius * 0.08, radius * 0.95), 10, 3, MAT.bark, () => 0.45); // спил светлее
+  const roots = 4 + Math.round(r() * 2);
+  for (let k = 0; k < roots; k++) {
+    const a = (k / roots) * Math.PI * 2 + gauss(r) * 0.3;
+    const o = v(Math.cos(a), 0, Math.sin(a));
+    b.tube([o.clone().multiplyScalar(radius * 0.6).setY(H * 0.25), o.clone().multiplyScalar(radius * 1.9).setY(-0.02)], [radius * 0.32, radius * 0.1], 4, MAT.bark, () => 0.28);
+  }
+  return b.build();
+}
+
+/** Куст подлеска (не вид: фон, в журнал не идёт). */
+export function buildShrub(r: Rng, size: number): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  const stems = 5 + Math.round(r() * 4);
+  for (let k = 0; k < stems; k++) {
+    const d = v(gauss(r) * 0.45, 1, gauss(r) * 0.45).normalize();
+    const L = size * range(r, 0.6, 1.1);
+    b.tube([v(0, 0, 0), d.clone().multiplyScalar(L)], [0.012, 0.005], 3, MAT.bark, () => 0.3);
+    for (let j = 0; j < 7; j++) {
+      const at = d.clone().multiplyScalar(L * range(r, 0.35, 1));
+      const ld = randDir(r);
+      ld.y = Math.abs(ld.y) * 0.5 + 0.2;
+      ld.normalize();
+      const ll = size * range(r, 0.12, 0.2);
+      b.blade(at, ld, perp(ld), ll, ll * 0.55, v(0, -ll * 0.2, 0), 2, MAT.foliage, range(r, 0.35, 0.5), 0.3);
+    }
+  }
+  return b.build();
+}
+
+/** Мелкий камень / галька. */
+export function buildPebble(r: Rng, radius: number): THREE.BufferGeometry {
+  const b = new GeoBuilder();
+  b.ellipsoid(v(0, radius * 0.3, 0), v(radius, radius * range(r, 0.4, 0.7), radius * range(r, 0.7, 1.1)), 7, 4, MAT.rock, () => range(r, 0.4, 0.6));
   return b.build();
 }
 

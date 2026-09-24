@@ -1,48 +1,69 @@
 // Полевой журнал и панель детального скана (GDD → Наука).
-import { el } from '../debug/ui';
 import { cladogram, currentPass, leaves, measurements, PASS_RU, PASSES, type CladeNode, type Research, type Study } from '../game/research';
 import { CLADE_RU, type Species } from '../world/species';
+import { h, latin } from './dom';
+import { INK, SANS, SERIF } from './theme';
 
-const PANEL = 'position:fixed;z-index:6;background:rgba(2,10,14,.82);border:1px solid rgba(120,200,230,.25);color:#bfe3ee;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:14px 16px;box-sizing:border-box';
-
+/** Панель детального скана. DOM строится один раз на образец, дальше обновляются классы и ширины. */
 export class StudyPanel {
-  private root = el('div', `${PANEL};right:24px;top:50%;transform:translateY(-50%);width:340px;display:none`);
+  private root = h('div.study.panel.ui');
+  private key = '';
+  private passEls: HTMLElement[] = [];
+  private barEls: HTMLElement[] = [];
+  private meas = h('div.meas');
+  private shownMeas = -1;
+  private nameBox = h('div');
+  private foot = h('div.foot');
 
   constructor() {
     document.body.append(this.root);
   }
 
   hide(): void {
-    this.root.style.display = 'none';
+    this.root.classList.remove('on');
+    this.key = '';
   }
 
   show(s: Study, sp: Species, done: boolean): void {
-    this.root.style.display = 'block';
-    const pass = currentPass(s);
-    const passIdx = PASSES.indexOf(pass);
-    const shown = done ? 3 : passIdx;
-    const bar = el('div', 'height:4px;background:rgba(120,200,230,.2);margin:8px 0 12px');
-    bar.append(el('div', `height:100%;width:${Math.round(s.progress * 100)}%;background:#8fe6ff`));
-    const title = done
-      ? el('div', '', el('div', 'font-size:16px;color:#ffe2a8;font-style:italic', sp.name), el('div', 'color:#9cc', sp.ru))
-      : el('div', 'color:#9cc', `неизвестный вид · ${CLADE_RU[sp.clade]}`);
-    const list = el('div', 'margin-top:10px');
-    for (const m of measurements(sp, shown)) {
-      list.append(el('div', 'display:flex;justify-content:space-between;gap:12px', el('span', 'color:#7aa', m.label), el('span', '', m.value)));
+    const key = `${sp.id}:${done}`;
+    if (key !== this.key) this.build(sp, done, key);
+    this.root.classList.add('on');
+    const idx = done ? 3 : PASSES.indexOf(currentPass(s));
+    this.passEls.forEach((el, i) => {
+      el.classList.toggle('done', i < idx);
+      el.classList.toggle('active', i === idx);
+      this.barEls[i].style.width = `${i < idx ? 100 : i === idx ? Math.round(((s.progress * 3) % 1) * 100) : 0}%`;
+    });
+    if (idx !== this.shownMeas) {
+      this.shownMeas = idx;
+      this.meas.replaceChildren(...measurements(sp, idx).map((m) => h('div.m', h('span', m.label), h('span', m.value))));
     }
-    this.root.replaceChildren(
-      el('div', 'letter-spacing:.12em;color:#8fe6ff', done ? 'ВИД ОПИСАН' : `ДЕТАЛЬНЫЙ СКАН · ${passIdx + 1}/3 · ${PASS_RU[pass]}`),
-      bar,
-      title,
-      list,
-      el('div', 'margin-top:14px;color:#577', done ? '' : 'E — прервать · мир вокруг не ждёт'),
+  }
+
+  private build(sp: Species, done: boolean, key: string): void {
+    this.key = key;
+    this.shownMeas = -1;
+    this.passEls = [];
+    this.barEls = [];
+    const passes = PASSES.map((p) => {
+      const bar = h('b');
+      this.barEls.push(bar);
+      const el = h('div.pass', h('i'), h('span', PASS_RU[p]), h('div.bar', bar));
+      this.passEls.push(el);
+      return el;
+    });
+    this.nameBox.replaceChildren(
+      done ? h('div.name', latin(sp.name)) : h('div.name', 'Неизвестный вид'),
+      h('div.sub', done ? `${sp.ru} · ${CLADE_RU[sp.clade]}` : CLADE_RU[sp.clade]),
     );
+    this.foot.textContent = done ? 'Запись добавлена в журнал' : 'E — прервать · мир вокруг не ждёт';
+    this.root.replaceChildren(h(done ? 'div.kicker.accent' : 'div.kicker', done ? 'Вид описан' : 'Детальный скан'), this.nameBox, h('div.passes', ...passes), this.meas, this.foot);
   }
 }
 
 export class Journal {
-  private root = el('div', `${PANEL};inset:5% 6%;display:none;overflow:auto;background:rgba(2,8,11,.96)`);
-  private canvas = el('canvas', 'width:100%;height:320px;display:block;margin-top:10px');
+  private root = h('div.journal.panel.ui');
+  private canvas = h('canvas');
   open = false;
 
   constructor() {
@@ -51,41 +72,41 @@ export class Journal {
 
   toggle(r: Research, species: Species[], seed: number): void {
     this.open = !this.open;
-    this.root.style.display = this.open ? 'block' : 'none';
+    this.root.classList.toggle('on', this.open);
     if (this.open) this.render(r, species, seed);
   }
 
   close(): void {
     this.open = false;
-    this.root.style.display = 'none';
+    this.root.classList.remove('on');
   }
 
   private render(r: Research, species: Species[], seed: number): void {
     const docs = species.filter((s) => r.documented.has(s.id));
-    const cards = el('div', 'display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px');
-    for (const s of docs) {
-      const obs = [...(r.observations.get(s.id) ?? [])];
-      if (s.genome.hostPlant !== null) obs.push(`кормится на ${species[s.genome.hostPlant].name}`);
-      const card = el(
-        'div',
-        'border:1px solid rgba(120,200,230,.2);padding:10px 12px',
-        el('div', 'font-style:italic;color:#ffe2a8;font-size:15px', s.name),
-        el('div', 'color:#9cc', `${s.ru} · ${CLADE_RU[s.clade]}`),
-      );
-      for (const m of measurements(s, 3)) {
-        card.append(el('div', 'display:flex;justify-content:space-between', el('span', 'color:#7aa', m.label), el('span', '', m.value)));
+    const cards = h('div.cards');
+    const known = (s: Species) => (r.documented.has(s.id) ? 0 : 1);
+    for (const s of [...species].sort((a, b) => known(a) - known(b))) {
+      if (!r.documented.has(s.id)) {
+        cards.append(h('div.card.unknown', h('div.kicker', 'Не описан'), h('div.sub', CLADE_RU[s.clade])));
+        continue;
       }
-      for (const o of obs) card.append(el('div', 'color:#c9a;margin-top:4px', `· ${o}`));
+      const card = h('div.card', latin(s.name), h('div.sub', `${s.ru} · ${CLADE_RU[s.clade]}`));
+      for (const m of measurements(s, 3)) card.append(h('div.m', h('span', m.label), h('span', m.value)));
+      for (const o of r.observations.get(s.id) ?? []) card.append(h('div.obs', o));
       cards.append(card);
     }
-    const unknown = species.length - docs.length;
     this.root.replaceChildren(
-      el('div', 'letter-spacing:.15em;color:#8fe6ff', `ПОЛЕВОЙ ЖУРНАЛ · мир ${seed}`),
-      el('div', 'color:#7aa', `описано ${docs.length} из ${species.length} · не описано ${unknown} · Tab — закрыть`),
-      docs.length >= 2 ? el('div', 'margin-top:14px;color:#8fe6ff', 'КЛАДОГРАММА (UPGMA по геному)') : el('div', 'margin-top:14px;color:#577', 'Кладограмма появится со вторым описанным видом.'),
+      h(
+        'div.head',
+        h('div', h('div.kicker', `Полевой журнал · мир № ${seed}`), h('div.h2', `Описано ${docs.length} из ${species.length}`)),
+        h('div.small.muted', 'Tab — закрыть'),
+      ),
+      h('hr.rule'),
+      docs.length >= 2 ? h('div.kicker', 'Кладограмма · UPGMA по геному') : h('div.small.muted', 'Кладограмма появится со вторым описанным видом.'),
       ...(docs.length >= 2 ? [this.canvas] : []),
       cards,
     );
+    this.canvas.style.height = `${Math.max(110, docs.length * 38)}px`;
     if (docs.length >= 2) requestAnimationFrame(() => this.drawTree(cladogram(docs)!, species));
   }
 
@@ -99,20 +120,28 @@ export class Journal {
     const W = c.clientWidth;
     const H = c.clientHeight;
     const order = leaves(root);
-    const labelW = Math.min(300, W * 0.4);
+    const labelW = Math.min(320, W * 0.42);
     const maxH = root.height || 1;
     const yOf = new Map<number, number>();
-    order.forEach((id, i) => yOf.set(id, 16 + (i * (H - 32)) / Math.max(1, order.length - 1)));
-    const x = (h: number) => 20 + (1 - h / maxH) * (W - labelW - 40);
-    g.strokeStyle = 'rgba(143,230,255,.7)';
-    g.fillStyle = '#bfe3ee';
-    g.lineWidth = 1.2;
-    g.font = '12px ui-monospace, Menlo, Consolas, monospace';
+    order.forEach((id, i) => yOf.set(id, 14 + (i * (H - 28)) / Math.max(1, order.length - 1)));
+    const x = (hh: number) => 10 + (1 - hh / maxH) * (W - labelW - 30);
+    g.strokeStyle = INK(0.55);
+    g.lineWidth = 1;
     const draw = (n: CladeNode): number => {
       if (n.species !== null) {
         const y = yOf.get(n.species)!;
         const s = species[n.species];
-        g.fillText(`${s.name} · ${CLADE_RU[s.clade]}`, x(0) + 8, y + 4);
+        g.fillStyle = INK(0.95);
+        g.font = `italic 15px ${SERIF}`;
+        g.fillText(s.name, x(0) + 12, y + 5);
+        const w = g.measureText(s.name).width;
+        g.fillStyle = INK(0.4);
+        g.font = `12px ${SANS}`;
+        g.fillText(`  ${CLADE_RU[s.clade]}`, x(0) + 12 + w, y + 5);
+        g.fillStyle = INK(0.9);
+        g.beginPath();
+        g.arc(x(0), y, 2.2, 0, Math.PI * 2);
+        g.fill();
         return y;
       }
       const ys = n.children.map(draw);

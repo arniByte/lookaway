@@ -104,11 +104,7 @@ export function stableFrames(frames: RawFrame[], cfg: Config = defaultConfig): R
   return picked.filter((_, i) => feats[i].every((v, j) => j === 0 || Math.abs(v - med[j]) / sig[j] <= 4));
 }
 
-/** Длительности эпизодов, где score ≥ threshold (для оценки длительности моргания). */
-export function runDurations(frames: RawFrame[], score: (f: RawFrame) => number, threshold: number): number[] {
-  return runs(frames, score, threshold).map((r) => r.ms);
-}
-
+/** Эпизоды, где score ≥ threshold: длительность и пик (оценка моргания). */
 function runs(frames: RawFrame[], score: (f: RawFrame) => number, threshold: number): { ms: number; peak: number }[] {
   const out: { ms: number; peak: number }[] = [];
   let start: number | null = null;
@@ -164,12 +160,12 @@ export function computeProfile(data: CalibData, cfg: Config = defaultConfig): Ca
   // 2. Веки: открытые — все кадры точек, закрытые — шаг с закрытыми глазами.
   const openFrames = faces(data.points.flatMap((p) => p.frames));
   const closedFrames = faces(data.closed);
-  if (closedFrames.length < cc.minFramesPerStep) fatal.push(`Шаг «closed»: лицо почти не видно (${closedFrames.length} кадров).`);
+  if (closedFrames.length < cc.minFramesPerStep) fatal.push(`Закрытые глаза: лицо почти не видно (${closedFrames.length} кадров).`);
   const open = { L: median(openFrames.map((f) => f.blinkL)), R: median(openFrames.map((f) => f.blinkR)) };
   const shut = { L: median(closedFrames.map((f) => f.blinkL)), R: median(closedFrames.map((f) => f.blinkR)) };
   for (const eye of ['L', 'R'] as const) {
     const sep = shut[eye] - open[eye];
-    if (!(sep >= cc.minSeparation)) {
+    if (Number.isFinite(sep) && sep < cc.minSeparation) {
       fatal.push(`Глаз ${eye}: закрытые плохо отличаются от открытых (${sep.toFixed(2)}). Очки, блики или свет?`);
     }
   }

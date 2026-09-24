@@ -80,6 +80,20 @@ describe('мир', () => {
     expect(w.colliders.every((c) => Math.hypot(c.x - w.spawn.x, c.z - w.spawn.z) > c.r)).toBe(true);
   });
 
+  it('подлесок: стволы лежат по склону, пни не пересекаются с деревьями, всё в долине', () => {
+    const R = config.world.radius;
+    expect(w.logs.length).toBeGreaterThan(config.world.logCount * 0.5);
+    expect(w.stumps.length).toBeGreaterThan(config.world.stumpCount * 0.5);
+    expect(w.shrubs.length).toBeGreaterThan(50);
+    for (const l of [...w.logs, ...w.stumps, ...w.shrubs, ...w.pebbles]) expect(Math.hypot(l.x, l.z)).toBeLessThan(R);
+    for (const l of w.logs) {
+      expect(Math.abs(l.tilt)).toBeLessThan(0.6);
+      expect(l.y).toBeCloseTo(w.height(l.x, l.z), -0.5);
+    }
+    const trunks = w.plants.filter((p) => p.collider > 0);
+    for (const s of w.stumps) for (const t of trunks) expect(Math.hypot(s.x - t.x, s.z - t.z)).toBeGreaterThan(s.scale + t.collider);
+  });
+
   it('каждый вид представлен, фауна у кормовых растений', () => {
     for (const s of w.species) {
       const n = s.kingdom === 'plant' ? w.plants.filter((p) => p.species === s.id).length : w.animals.filter((a) => a.species === s.id).length;

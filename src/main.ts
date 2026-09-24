@@ -1,7 +1,7 @@
-// Точка входа: грейбокс M1 (по умолчанию) или площадка трекинга M0 (?m0). Debug-оверлей — в обоих.
+// Точка входа: игра (по умолчанию) или площадка трекинга M0 (?m0). Debug-оверлей — в обоих.
+import './ui/theme.css';
 import { config } from './config';
-import { runCalibration, runRecenter } from './debug/calibrationWizard';
-import { unlockAudio } from './debug/beep';
+import { unlockAudio } from './audio/beep';
 import { Overlay } from './debug/overlay';
 import { Playground } from './debug/playground';
 import { runProtocol } from './debug/protocolRunner';
@@ -16,6 +16,7 @@ import { ReplaySource } from './input/sources/replaySource';
 import { TrackerSource } from './input/sources/trackerSource';
 import { prefetchTrackerAssets } from './input/tracker';
 import type { CalibrationProfile, EyeSource, EyeState, SourceKind } from './input/types';
+import { runCalibration, runRecenter } from './ui/calibration';
 
 function loadProfile(): CalibrationProfile {
   try {
@@ -107,6 +108,12 @@ async function calibrate(): Promise<string | null> {
     return res.fatal.length ? `Калибровка не принята:\n${res.fatal.join('\n')}` : null;
   } catch (err) {
     const aborted = (err as Error).name === 'AbortError';
+    // Esc при сохранённом профиле — играть с прошлой калибровкой.
+    if (aborted && profile.calibrated) {
+      overlay.setStatus('Калибровка пропущена: прошлый профиль.');
+      tracker.gaze.setProfile(profile);
+      return null;
+    }
     overlay.setStatus(aborted ? 'Калибровка отменена.' : `Ошибка: ${(err as Error).message}`);
     return aborted ? 'Калибровка отменена.' : (err as Error).message;
   } finally {
@@ -204,10 +211,11 @@ function makeView(): View {
   }
   overlay.toggle(); // в игре оверлей скрыт до ё
   return new FieldApp(canvas, {
+    // Калибровка на каждом входе: свет, поза и очки меняются от сессии к сессии.
     async startCamera() {
       const err = await selectSource('tracker');
       if (err) return err;
-      return profile.calibrated ? null : await calibrate();
+      return await calibrate();
     },
     async startKeyboard() {
       await selectSource('fallback');

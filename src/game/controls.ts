@@ -1,5 +1,6 @@
 // Режим A (GDD → Управление): WASD + мышь. Клавиши — только через event.code (русская раскладка).
-// Space, C, L заняты fallback-глазами (CLAUDE.md, правило 2), поэтому скан — ЛКМ или F.
+// Импульс — закрыть и открыть глаза. Без камеры глаза — fallback (удержание C, CLAUDE.md, правило 2);
+// удержание ЛКМ или F работает так же, как закрытые глаза.
 import { config } from '../config';
 import type { EyeState } from '../input/types';
 import type { PlayerInput } from './player';
@@ -8,11 +9,15 @@ export class KeyboardMouse {
   private keys = new Set<string>();
   private dx = 0;
   private dy = 0;
-  private scan = false;
+  private held = { mouse: false, key: false };
+  private released = false;
   private interact = false;
   private journal = false;
   private recenter = false;
+  private palette = false;
   enabled = true;
+  /** Кнопки импульса (ЛКМ, F) — только без камеры: с камерой импульс только глазами. */
+  scanButtons = true;
 
   constructor(private canvas: HTMLCanvasElement) {
     addEventListener('keydown', (e) => {
@@ -20,20 +25,30 @@ export class KeyboardMouse {
       if (e.code === 'Tab') e.preventDefault();
       if (e.repeat) return;
       this.keys.add(e.code);
-      if (e.code === 'KeyF') this.scan = true;
+      if (e.code === 'KeyF') this.held.key = true;
       if (e.code === 'KeyE') this.interact = true;
       if (e.code === 'Tab') this.journal = true;
       if (e.code === 'KeyR') this.recenter = true;
+      if (e.code === 'KeyV') this.palette = true;
     });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
-    addEventListener('blur', () => this.keys.clear());
+    addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'KeyF') this.release('key');
+    });
+    addEventListener('blur', () => {
+      this.keys.clear();
+      this.held.mouse = this.held.key = false;
+    });
     canvas.addEventListener('mousedown', (e) => {
       if (!this.enabled) return;
       if (document.pointerLockElement !== canvas) {
         void canvas.requestPointerLock?.();
         return;
       }
-      if (e.button === 0) this.scan = true;
+      if (e.button === 0) this.held.mouse = true;
+    });
+    addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.release('mouse');
     });
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement === canvas && this.enabled) {
@@ -41,6 +56,24 @@ export class KeyboardMouse {
         this.dy += e.movementY;
       }
     });
+  }
+
+  private release(which: 'mouse' | 'key'): void {
+    if (!this.held[which]) return;
+    this.held[which] = false;
+    this.released = true;
+  }
+
+  /** Кнопка импульса зажата: сканер копит, экран тёмный — как с закрытыми глазами. */
+  get scanHeld(): boolean {
+    return this.scanButtons && this.enabled && (this.held.mouse || this.held.key);
+  }
+
+  /** Кнопку отпустили с прошлого вызова. */
+  consumeScanRelease(): boolean {
+    const r = this.released && this.scanButtons;
+    this.released = false;
+    return r;
   }
 
   get locked(): boolean {
@@ -68,34 +101,38 @@ export class KeyboardMouse {
     return out;
   }
 
-  private take(key: 'scan' | 'interact' | 'journal' | 'recenter'): boolean {
+  private take(key: 'interact' | 'journal' | 'recenter' | 'palette'): boolean {
     const v = this[key];
     this[key] = false;
     return v;
   }
 
-  consumeScan = () => this.take('scan');
   consumeInteract = () => this.take('interact');
   consumeJournal = () => this.take('journal');
   consumeRecenter = () => this.take('recenter');
+  consumePalette = () => this.take('palette');
+}
+
+/** Импульс глазами: закрыты — копит, открылись — выпуск. Потеря сигнала — никогда (это не «закрыты»). */
+export function eyePulse(eye: EyeState): { charging: boolean; release: boolean } {
+  if (eye.lost) return { charging: false, release: false };
+  return { charging: eye.closed, release: eye.events.includes('closeEnd') };
 }
 
 /**
- * Режим B (эксперимент): всё глазами. Держишь глаза закрытыми — идёшь вперёд вслепую;
- * взгляд у края экрана — поворот; открыл глаза — импульс; задержал взгляд в центре — действие.
+ * Режим B (эксперимент): всё глазами. Держишь глаза закрытыми — идёшь вперёд вслепую (и копишь импульс);
+ * взгляд у края экрана — поворот; задержал взгляд в центре — действие.
  * Читает только EyeState (CLAUDE.md, правило 1).
  */
 export class HandsFree {
   private dwell = 0;
 
-  update(eye: EyeState, dtMs: number, hasPrompt: boolean): { input: PlayerInput; scan: boolean; interact: boolean } {
+  update(eye: EyeState, dtMs: number, hasPrompt: boolean): { input: PlayerInput; interact: boolean } {
     const h = config.handsFree;
     const input: PlayerInput = { forward: 0, strafe: 0, run: false, turn: 0, look: 0 };
-    let scan = false;
     let interact = false;
-    if (eye.lost) return { input, scan, interact };
+    if (eye.lost) return { input, interact };
     if (eye.closed) input.forward = 1;
-    if (eye.events.includes('closeEnd')) scan = true;
     const open = !eye.blink && !eye.closed;
     if (open) {
       const gx = eye.gaze.x;
@@ -111,7 +148,7 @@ export class HandsFree {
     } else {
       this.dwell = 0;
     }
-    return { input, scan, interact };
+    return { input, interact };
   }
 
   /** 0..1 — прогресс задержки взгляда (для HUD). */

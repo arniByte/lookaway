@@ -124,7 +124,3 @@ export function measurements(s: Species, passes: number): { label: string; value
   if (passes >= 3) out.push({ label: 'свечение', value: g.lumPeak ? `пик ${g.lumPeak} нм` : 'нет' });
   return out;
 }
-
-export function progressGoal(cfg: Config = defaultConfig): number {
-  return cfg.research.documentGoal;
-}

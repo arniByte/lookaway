@@ -29,6 +29,21 @@ export interface GrassClump extends Vec3 {
   scale: number;
 }
 
+/** Упавший ствол: лежит вдоль yaw, наклонён по склону. */
+export interface LogInstance extends Vec3 {
+  yaw: number;
+  tilt: number;
+  len: number;
+  r: number;
+  seed: number;
+}
+
+export interface Scatter extends Vec3 {
+  rot: number;
+  scale: number;
+  seed: number;
+}
+
 export interface AnimalSpawn extends Vec3 {
   id: number;
   species: number;
@@ -49,6 +64,10 @@ export interface World {
   plants: PlantInstance[];
   rocks: RockInstance[];
   grass: GrassClump[];
+  logs: LogInstance[];
+  stumps: Scatter[]; // scale — радиус, м
+  shrubs: Scatter[];
+  pebbles: Scatter[];
   animals: AnimalSpawn[];
   beacon: Vec3;
   spawn: { x: number; z: number; yaw: number };
@@ -147,6 +166,38 @@ export function generateWorld(seed: number, cfg: Config = defaultConfig): World 
     }
   }
 
+  // Упавшие стволы и пни: лес выглядит прожитым.
+  const lr = fork(seed, 'logs');
+  const logs: LogInstance[] = [];
+  for (let i = 0, tries = 0; logs.length < wc.logCount && tries < wc.logCount * 20; tries++) {
+    const a = lr() * Math.PI * 2;
+    const d = Math.sqrt(lr()) * (R - 6);
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    if (d < wc.spawnClearing + 2 || clearing(x, z) > 0.55) continue;
+    const len = range(lr, 2.5, 6.5);
+    const yaw = lr() * Math.PI;
+    const dx = (Math.cos(yaw) * len) / 2;
+    const dz = (-Math.sin(yaw) * len) / 2;
+    if (tooClose(x + dx, z + dz, 0.4) || tooClose(x - dx, z - dz, 0.4) || tooClose(x, z, 0.5)) continue;
+    const h0 = height(x - dx, z - dz);
+    const h1 = height(x + dx, z + dz);
+    logs.push({ x, z, y: (h0 + h1) / 2, yaw, tilt: Math.atan2(h1 - h0, len), len, r: range(lr, 0.14, 0.32), seed: int(lr, 0, 1e9) });
+    i++;
+  }
+  const stumps: Scatter[] = [];
+  for (let i = 0, tries = 0; stumps.length < wc.stumpCount && tries < wc.stumpCount * 20; tries++) {
+    const a = lr() * Math.PI * 2;
+    const d = Math.sqrt(lr()) * (R - 5);
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    const r = range(lr, 0.18, 0.4);
+    if (d < wc.spawnClearing + 2 || clearing(x, z) > 0.6 || tooClose(x, z, r + 0.8)) continue;
+    stumps.push({ x, z, y: height(x, z), rot: lr() * Math.PI * 2, scale: r, seed: int(lr, 0, 1e9) });
+    colliders.push({ x, z, r: r * 1.2 });
+    i++;
+  }
+
   // Папоротники: подлесок.
   const fr = fork(seed, 'ferns');
   const ferns = bySpecies('filix');
@@ -212,6 +263,31 @@ export function generateWorld(seed: number, cfg: Config = defaultConfig): World 
     }
   }
 
+  // Кусты подлеска и галька: фон, не виды.
+  const sr0 = fork(seed, 'shrubs');
+  const shrubs: Scatter[] = [];
+  for (let gx = -R; gx < R; gx += wc.shrubCell) {
+    for (let gz = -R; gz < R; gz += wc.shrubCell) {
+      const x = gx + sr0() * wc.shrubCell;
+      const z = gz + sr0() * wc.shrubCell;
+      if (!inside(x, z, 2) || Math.hypot(x, z) < wc.spawnClearing) continue;
+      const c = clearing(x, z);
+      if (!chance(sr0, wc.shrubDensity * (1 - Math.abs(c - 0.45) * 1.6))) continue; // гуще на опушках
+      if (tooClose(x, z, 0.5)) continue;
+      shrubs.push({ x, z, y: height(x, z), rot: sr0() * Math.PI * 2, scale: range(sr0, 0.5, 1.3), seed: int(sr0, 0, 1e9) });
+    }
+  }
+  const pebbles: Scatter[] = [];
+  for (let i = 0; i < wc.pebbleCount; i++) {
+    const near = rocks.length && chance(sr0, 0.5) ? pick(sr0, rocks) : null;
+    const a = sr0() * Math.PI * 2;
+    const d = near ? near.r + range(sr0, 0.2, 2.5) : Math.sqrt(sr0()) * (R - 3);
+    const x = (near?.x ?? 0) + Math.cos(a) * d;
+    const z = (near?.z ?? 0) + Math.sin(a) * d;
+    if (!inside(x, z, 1)) continue;
+    pebbles.push({ x, z, y: height(x, z), rot: sr0() * Math.PI * 2, scale: range(sr0, 0.04, 0.16), seed: int(sr0, 0, 1e9) });
+  }
+
   // Фауна: бабочки — у куртин кормового растения, жуки — у стволов и грибов, стрекозовидные — над полянами.
   const ar = fork(seed, 'animals');
   const animals: AnimalSpawn[] = [];
@@ -259,6 +335,10 @@ export function generateWorld(seed: number, cfg: Config = defaultConfig): World 
     plants,
     rocks,
     grass,
+    logs,
+    stumps,
+    shrubs,
+    pebbles,
     animals,
     beacon,
     spawn: { x: 0, z: 3, yaw: Math.PI }, // спиной к маяку: впереди долина, маяк — засечка на кольце HUD

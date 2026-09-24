@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { config } from '../config';
-import { buildAnimal, buildBeacon, buildGrass, buildPlant, buildRock, MAT, tagSpecies, type AnimalParts } from '../world/meshes';
+import { buildAnimal, buildBeacon, buildGrass, buildLog, buildPebble, buildPlant, buildRock, buildShrub, buildStump, MAT, tagSpecies, type AnimalParts } from '../world/meshes';
 import { makeRng } from '../world/random';
 import type { World } from '../world/worldgen';
 
@@ -32,12 +32,29 @@ const SCAN_FRAG = /* glsl */ `
   varying vec3 vNormalW;
   varying float vRefl;
   varying float vCode;
+
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+
   void main() {
     vec3 d = vWorld - uOrigin;
     float dist = length(d);
     vec3 dir = d / max(dist, 1e-4);
     float cosi = abs(dot(normalize(vNormalW), dir));
     float intensity = clamp(vRefl * (0.25 + 0.75 * cosi), 0.0, 1.5);
+    // Фактура: подстилка на земле, лишайник на камнях — пятна отражения, как в реальном скане.
+    float mat = mod(vCode, 16.0);
+    if (mat < 1.5) {
+      vec2 p = vWorld.xz;
+      intensity *= 0.62 + 0.42 * vnoise(p * 0.9) + 0.3 * vnoise(p * 4.3) - 0.12 * step(0.82, vnoise(p * 11.0));
+    } else if (mat < 2.5) {
+      intensity *= 0.75 + 0.5 * vnoise(vWorld.xz * 5.0 + vWorld.y * 3.0);
+    }
     gl_FragColor = vec4(dist, vCode, intensity, dot(uVel, dir));
   }
 `;
@@ -90,6 +107,18 @@ export class ScanScene {
     this.dark.scale.setScalar(config.dark.radius);
     this.dark.position.set(world.darkSpawn.x, world.darkSpawn.y + config.dark.radius, world.darkSpawn.z);
     this.scene.add(this.dark);
+  }
+
+  /** Освободить GPU-буферы: мир пересоздаётся на каждый забег. */
+  dispose(): void {
+    const mats = new Set<THREE.Material>();
+    this.scene.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        mats.add(o.material as THREE.Material);
+      }
+    });
+    for (const m of mats) m.dispose();
   }
 
   private buildTerrain(world: World): THREE.Mesh {
@@ -157,6 +186,15 @@ export class ScanScene {
     for (const r of world.rocks) {
       put(r.x, r.z, place(tagSpecies(buildRock(r.seed, r.r), null), r.x, r.y - r.r * 0.15, r.z, 0, 1));
     }
+    for (const l of world.logs) {
+      m.compose(new THREE.Vector3(l.x, l.y - l.r * 0.35, l.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, l.yaw, l.tilt, 'YXZ')), new THREE.Vector3(1, 1, 1));
+      put(l.x, l.z, tagSpecies(buildLog(l.seed, l.len, l.r), null).applyMatrix4(m));
+    }
+    for (const st of world.stumps) put(st.x, st.z, place(tagSpecies(buildStump(st.seed, st.scale), null), st.x, st.y, st.z, st.rot, 1));
+    const shrubVariants = Array.from({ length: 5 }, (_, i) => tagSpecies(buildShrub(makeRng(world.seed * 7 + i), 1), null));
+    world.shrubs.forEach((c, i) => put(c.x, c.z, place(shrubVariants[i % shrubVariants.length], c.x, c.y, c.z, c.rot, c.scale)));
+    const pebbleVariants = Array.from({ length: 6 }, (_, i) => tagSpecies(buildPebble(makeRng(world.seed * 11 + i), 1), null));
+    world.pebbles.forEach((c, i) => put(c.x, c.z, place(pebbleVariants[i % pebbleVariants.length], c.x, c.y, c.z, c.rot, c.scale)));
     const grassVariants = Array.from({ length: 6 }, (_, i) => tagSpecies(buildGrass(makeRng(world.seed + i)), null));
     world.grass.forEach((c, i) => {
       put(c.x, c.z, place(grassVariants[i % grassVariants.length], c.x, c.y, c.z, c.rot, c.scale));
@@ -170,7 +208,7 @@ export class ScanScene {
       merged.computeBoundingSphere();
       meshes.push(new THREE.Mesh(merged, this.staticMat));
     }
-    for (const g of variants.values()) g.dispose();
+    for (const g of [...variants.values(), ...grassVariants, ...shrubVariants, ...pebbleVariants]) g.dispose();
     onProgress?.(1);
     return meshes;
   }
